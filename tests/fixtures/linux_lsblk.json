@@ -1,0 +1,80 @@
+{
+  "blockdevices": [
+    {
+      "name": "sda",
+      "path": "/dev/sda",
+      "size": "256060514304",
+      "type": "disk",
+      "rm": "0",
+      "fstype": null,
+      "mountpoint": null,
+      "model": "Samsung SSD 860",
+      "label": null,
+      "pkname": null,
+      "children": [
+        {
+          "name": "sda1",
+          "path": "/dev/sda1",
+          "size": "536870912",
+          "type": "part",
+          "rm": "0",
+          "fstype": "vfat",
+          "mountpoint": "/boot/efi",
+          "model": null,
+          "label": "ESP",
+          "pkname": "sda"
+        },
+        {
+          "name": "sda2",
+          "path": "/dev/sda2",
+          "size": "255521931264",
+          "type": "part",
+          "rm": "0",
+          "fstype": "ext4",
+          "mountpoint": "/",
+          "model": null,
+          "label": null,
+          "pkname": "sda"
+        }
+      ]
+    },
+    {
+      "name": "sdb",
+      "path": "/dev/sdb",
+      "size": "32017047552",
+      "type": "disk",
+      "rm": "1",
+      "fstype": null,
+      "mountpoint": null,
+      "model": "SanDisk Ultra",
+      "label": null,
+      "pkname": null,
+      "children": [
+        {
+          "name": "sdb1",
+          "path": "/dev/sdb1",
+          "size": "32015998976",
+          "type": "part",
+          "rm": "1",
+          "fstype": "exfat",
+          "mountpoint": "/media/user/SANDISK",
+          "model": null,
+          "label": "SANDISK",
+          "pkname": "sdb"
+        }
+      ]
+    },
+    {
+      "name": "loop0",
+      "path": "/dev/loop0",
+      "size": "123456",
+      "type": "loop",
+      "rm": "0",
+      "fstype": "squashfs",
+      "mountpoint": "/snap/core/1234",
+      "model": null,
+      "label": null,
+      "pkname": null
+    }
+  ]
+}

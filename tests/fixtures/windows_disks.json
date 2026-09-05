@@ -1,0 +1,20 @@
+[
+  {
+    "Number": 0,
+    "FriendlyName": "Samsung SSD 970 EVO",
+    "Size": 512110190592,
+    "BusType": "NVMe",
+    "PartitionStyle": 2,
+    "OperationalStatus": 1,
+    "HealthStatus": 0
+  },
+  {
+    "Number": 1,
+    "FriendlyName": "SanDisk Cruzer USB Device",
+    "Size": 16008609280,
+    "BusType": "USB",
+    "PartitionStyle": 1,
+    "OperationalStatus": 1,
+    "HealthStatus": 0
+  }
+]

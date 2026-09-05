@@ -1,0 +1,30 @@
+[
+  {
+    "DiskNumber": 0,
+    "PartitionNumber": 1,
+    "DriveLetter": null,
+    "Size": 104857600,
+    "Type": "Recovery"
+  },
+  {
+    "DiskNumber": 0,
+    "PartitionNumber": 2,
+    "DriveLetter": null,
+    "Size": 16777216,
+    "Type": "Reserved"
+  },
+  {
+    "DiskNumber": 0,
+    "PartitionNumber": 3,
+    "DriveLetter": "C",
+    "Size": 511004672000,
+    "Type": "Basic"
+  },
+  {
+    "DiskNumber": 1,
+    "PartitionNumber": 1,
+    "DriveLetter": "E",
+    "Size": 16000000000,
+    "Type": "Basic"
+  }
+]

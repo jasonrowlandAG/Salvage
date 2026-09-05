@@ -1,0 +1,16 @@
+[
+  {
+    "DriveLetter": "C",
+    "FileSystem": "NTFS",
+    "FileSystemLabel": "Windows",
+    "Size": 511004672000,
+    "SizeRemaining": 200000000000
+  },
+  {
+    "DriveLetter": "E",
+    "FileSystem": "exFAT",
+    "FileSystemLabel": "SANDISK",
+    "Size": 16000000000,
+    "SizeRemaining": 8000000000
+  }
+]
