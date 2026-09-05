@@ -128,6 +128,10 @@ class ScanPage(QWidget):
 
     def _on_finished(self, result: ScanResult) -> None:
         self.cancel_btn.setEnabled(False)
+        if result.cancelled:
+            self.error_label.setText("Scan cancelled.")
+            self.error_frame.show()
+            return
         if not result.success:
             self.error_label.setText(
                 (result.error or "The scan failed.")

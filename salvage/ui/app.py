@@ -108,3 +108,15 @@ class MainWindow(QMainWindow):
         self.session.reset()
         self.source_page.refresh()
         self.stack.setCurrentWidget(self.source_page)
+
+    def closeEvent(self, event) -> None:
+        # A ScanWorker/RecoverWorker QThread keeps running (and, for a scan, keeps the
+        # photorec subprocess alive) even after the window closes unless we stop it here.
+        worker = self.scan_page.worker
+        if worker is not None and worker.isRunning():
+            worker.cancel_event.set()
+            worker.wait(5000)
+        recover_worker = self._recover_worker
+        if recover_worker is not None and recover_worker.isRunning():
+            recover_worker.wait(5000)
+        super().closeEvent(event)

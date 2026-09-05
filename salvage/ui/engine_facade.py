@@ -77,13 +77,19 @@ def make_engine(fake: bool):
         return FakeEngine(), None, False
 
     binary = PhotoRecEngine.locate_binary()
+    if binary is None:
+        # No PhotoRec binary anywhere; constructing with None would just raise inside
+        # PhotoRecEngine.__init__ (it re-runs locate_binary()), so don't bother trying -
+        # go straight to FakeEngine and let __main__ show the install-prompt dialog.
+        return FakeEngine(), None, True
+
     try:
         engine = PhotoRecEngine(binary)
     except Exception as exc:  # defensive: contract says ctor may raise if unusable
         print(f"WARNING: could not construct PhotoRecEngine ({exc}); using FakeEngine.")
         return FakeEngine(), None, False
 
-    return engine, None, binary is None
+    return engine, None, False
 
 
 def list_devices(fake: bool) -> list[Device]:
