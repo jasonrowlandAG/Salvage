@@ -18,6 +18,7 @@ except ImportError:
     pty = None  # type: ignore[assignment]
 
 from salvage.engine.models import ScanMode, ScanProgress, ScanResult
+from salvage.engine.privileged import PrivilegedProcess, run_privileged
 from salvage.engine.results import collect_recovered, find_output_dirs
 
 # Live status line, e.g. "Pass 1 - Reading sector    12345/65536, " or the
@@ -89,51 +90,88 @@ class PhotoRecEngine:
         cmd = self._build_cmd(mode, extensions)
         args = [str(self.binary), "/log", "/d", str(out_base), "/cmd", str(source), cmd]
 
-        # PhotoRec's stdio is fully block-buffered when stdout isn't a tty, so a plain
-        # pipe delivers almost nothing until the process exits. Give it a pty so output
-        # streams as it's produced, which is what makes live progress possible.
-        master_fd: int | None = None
-        if pty is not None:
-            master_fd, slave_fd = pty.openpty()
-            proc = subprocess.Popen(
-                args,
-                cwd=str(workdir),
-                stdin=subprocess.DEVNULL,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                close_fds=True,
-            )
-            os.close(slave_fd)
-        else:
-            proc = subprocess.Popen(
-                args,
-                cwd=str(workdir),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
+        needs_privilege = (
+            platform.system() in ("Darwin", "Linux")
+            and os.geteuid() != 0
+            and str(source).startswith("/dev/")
+        )
 
+        priv_proc: PrivilegedProcess | None = None
+        proc: subprocess.Popen | None = None
+        master_fd: int | None = None
+        reader_thread: threading.Thread | None = None
         out_q: "queue.Queue[bytes | None]" = queue.Queue()
 
-        def _reader() -> None:
+        if needs_privilege:
             try:
-                while True:
-                    if master_fd is not None:
-                        try:
-                            chunk = os.read(master_fd, _CHUNK_SIZE)
-                        except OSError:
-                            return
-                    else:
-                        assert proc.stdout is not None
-                        chunk = proc.stdout.read(_CHUNK_SIZE)
-                    if not chunk:
-                        return
-                    out_q.put(chunk)
-            finally:
-                out_q.put(None)
+                priv_proc = run_privileged(args, workdir, linux=platform.system() == "Linux")
+            except PermissionError as exc:
+                return ScanResult(success=False, error=str(exc))
 
-        reader_thread = threading.Thread(target=_reader, daemon=True)
-        reader_thread.start()
+            def read_chunk(timeout: float) -> bytes | None:
+                data = priv_proc.read_new_output()
+                if data:
+                    return data
+                if priv_proc.poll() is not None:
+                    return priv_proc.read_new_output() or None
+                time.sleep(timeout)
+                return b""
+
+            def do_cancel() -> None:
+                priv_proc.cancel()
+
+        else:
+            # PhotoRec's stdio is fully block-buffered when stdout isn't a tty, so a plain
+            # pipe delivers almost nothing until the process exits. Give it a pty so output
+            # streams as it's produced, which is what makes live progress possible.
+            if pty is not None:
+                master_fd, slave_fd = pty.openpty()
+                proc = subprocess.Popen(
+                    args,
+                    cwd=str(workdir),
+                    stdin=subprocess.DEVNULL,
+                    stdout=slave_fd,
+                    stderr=slave_fd,
+                    close_fds=True,
+                )
+                os.close(slave_fd)
+            else:
+                proc = subprocess.Popen(
+                    args,
+                    cwd=str(workdir),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+
+            def _reader() -> None:
+                try:
+                    while True:
+                        if master_fd is not None:
+                            try:
+                                chunk = os.read(master_fd, _CHUNK_SIZE)
+                            except OSError:
+                                return
+                        else:
+                            assert proc.stdout is not None
+                            chunk = proc.stdout.read(_CHUNK_SIZE)
+                        if not chunk:
+                            return
+                        out_q.put(chunk)
+                finally:
+                    out_q.put(None)
+
+            reader_thread = threading.Thread(target=_reader, daemon=True)
+            reader_thread.start()
+
+            def read_chunk(timeout: float) -> bytes | None:
+                try:
+                    return out_q.get(timeout=timeout)
+                except queue.Empty:
+                    return b""
+
+            def do_cancel() -> None:
+                self._terminate(proc)
 
         progress = ScanProgress()
         start = time.monotonic()
@@ -145,12 +183,9 @@ class PhotoRecEngine:
         while True:
             if cancel is not None and cancel.is_set():
                 cancelled = True
-                self._terminate(proc)
+                do_cancel()
                 break
-            try:
-                chunk = out_q.get(timeout=0.1)
-            except queue.Empty:
-                chunk = b""
+            chunk = read_chunk(0.1)
             if chunk is None:
                 break
 
@@ -175,16 +210,20 @@ class PhotoRecEngine:
                 on_progress(ScanProgress(**progress.__dict__))
                 last_emit = now
 
-        reader_thread.join(timeout=2)
-        if master_fd is not None:
+        if priv_proc is not None:
+            priv_proc.wait(timeout=10)
+        else:
+            assert reader_thread is not None and proc is not None
+            reader_thread.join(timeout=2)
+            if master_fd is not None:
+                try:
+                    os.close(master_fd)
+                except OSError:
+                    pass
             try:
-                os.close(master_fd)
-            except OSError:
-                pass
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            self._terminate(proc)
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self._terminate(proc)
 
         log_path = workdir / "photorec.log"
         log_text = log_path.read_text(errors="replace") if log_path.exists() else ""
