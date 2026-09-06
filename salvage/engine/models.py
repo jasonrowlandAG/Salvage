@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Literal
@@ -39,14 +40,34 @@ class Device:
     parent_id: str | None = None  # partition -> its disk
 
 
+class Integrity(Enum):
+    """How well a recovered file's own format checks out — carving can produce
+    truncated or spliced files that still have the right magic bytes."""
+    UNKNOWN = "unknown"
+    INTACT = "intact"
+    PARTIAL = "partial"
+    CORRUPT = "corrupt"
+
+
 @dataclass(frozen=True)
 class RecoveredFile:
-    path: Path                    # where PhotoRec wrote it (inside the scan workdir)
+    path: Path                    # where the engine wrote it (inside the scan workdir)
     name: str
     ext: str                      # lowercase, no dot
     size: int
     category: Category
     offset: int | None = None     # byte offset on source, parsed from f<offset>.<ext> when possible
+    # Filesystem-derived metadata: present when recovered from filesystem records
+    # (Sleuth Kit) rather than carved by signature, which is what lets results keep
+    # their real names, folders and dates.
+    original_name: str | None = None
+    original_dir: str | None = None   # path within the source volume, e.g. "DCIM/100APPLE"
+    modified: datetime | None = None
+    created: datetime | None = None
+    deleted: bool = False             # the filesystem marks this entry as deleted
+    inode: str | None = None          # TSK metadata address, e.g. "12-128-3"
+    source_engine: str = "photorec"   # "photorec" | "sleuthkit"
+    integrity: Integrity = Integrity.UNKNOWN
 
 
 @dataclass
