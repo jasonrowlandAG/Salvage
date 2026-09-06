@@ -88,6 +88,7 @@ class FoundMedia:
     in_recently_deleted: bool = False
     note: str | None = None
     recovered: bool = False
+    cloud_placeholder: bool = False   # iCloud file not downloaded; reading it would trigger a download
 
 
 @dataclass
@@ -427,11 +428,22 @@ def _extract_taken(path: Path, ext: str, category: Category, fallback_mtime: flo
         return None
 
 
+_SF_DATALESS = 0x40000000
+
+
+def _is_dataless(st: os.stat_result) -> bool:
+    return bool(getattr(st, "st_flags", 0) & _SF_DATALESS)
+
+
 def _build_found_media(
-    path: Path, size: int, mtime: float, source_key: str, ext: str, display_name: str | None = None
+    path: Path, size: int, mtime: float, source_key: str, ext: str, display_name: str | None = None,
+    dataless: bool = False,
 ) -> FoundMedia:
     category = category_for(ext)
-    taken = _extract_taken(path, ext, category, mtime)
+    if dataless:
+        taken = _safe_mtime(mtime)
+    else:
+        taken = _extract_taken(path, ext, category, mtime)
     try:
         modified = datetime.fromtimestamp(mtime)
     except (OSError, OverflowError, ValueError):
@@ -447,7 +459,16 @@ def _build_found_media(
         modified=modified,
         sha256=None,
         duplicate_of=None,
+        cloud_placeholder=dataless,
+        note="In iCloud — not downloaded to this Mac" if dataless else None,
     )
+
+
+def _safe_mtime(mtime: float) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(mtime)
+    except (OSError, OverflowError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -548,7 +569,7 @@ def _scan_generic_dir(
         if min_size > 0 and st.st_size < min_size:
             emit()
             continue
-        fm = _build_found_media(path, st.st_size, st.st_mtime, source.key, ext)
+        fm = _build_found_media(path, st.st_size, st.st_mtime, source.key, ext, dataless=_is_dataless(st))
         found.append(fm)
         stats.media_found += 1
         stats.bytes += st.st_size
@@ -662,7 +683,7 @@ def _sha256_of(path: Path) -> str | None:
 
 def _dedupe(found: list[FoundMedia], cancel: threading.Event | None) -> None:
     def hash_one(fm: FoundMedia) -> tuple[FoundMedia, str | None]:
-        if cancel is not None and cancel.is_set():
+        if (cancel is not None and cancel.is_set()) or fm.cloud_placeholder:
             return fm, None
         return fm, _sha256_of(fm.path)
 

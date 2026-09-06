@@ -40,6 +40,7 @@ _BADGE_STYLE = {
     "Recovered": ("#0a72e8", "Recovered"),
     "Deleted": ("#c0392b", "Deleted"),
     "Dup": ("#8a6d1d", "Dup"),
+    "iCloud": ("#6e6e73", "iCloud"),
 }
 
 _ALL = "__all__"
@@ -113,6 +114,8 @@ class MediaListModel(QAbstractListModel):
                 badges.append("Deleted")
             if f.duplicate_of is not None:
                 badges.append("Dup")
+            if f.cloud_placeholder:
+                badges.append("iCloud")
             return badges
         return None
 
@@ -453,7 +456,11 @@ class MediaResultsPage(QWidget):
         self.preview_source.setText(f"Source: {self._source_labels.get(f.source_key, f.source_key)}")
         self.preview_path.setText(f"Path: {f.path}")
         self.preview_note.setText(f.note or "")
-        if f.category == "image":
+        if f.cloud_placeholder:
+            self._preview_path = None
+            self.preview_image.setPixmap(QPixmap())
+            self.preview_image.setText("Stored in iCloud — open it in Finder to download")
+        elif f.category == "image":
             self._preview_path = str(f.path)
             self.preview_image.setText("Loading preview…")
             self.preview_image.setPixmap(QPixmap())
@@ -490,6 +497,8 @@ class MediaResultsPage(QWidget):
         for row in range(start_row, end_row + 1):
             f = self.model.data(self.model.index(row), FoundMediaRole)
             if f is None:
+                continue
+            if f.cloud_placeholder:
                 continue
             if f.category in ("image", "video") and str(f.path) not in self.model._thumbs:
                 self.thumb_loader.request(f.path)
