@@ -120,6 +120,10 @@ class DeviceRow(QFrame):
 
         layout.addLayout(text_layout, 1)
 
+    def mousePressEvent(self, event) -> None:
+        self.clicked.emit(self.device)
+        super().mousePressEvent(event)
+
     def set_selected(self, selected: bool) -> None:
         self.setProperty("selected", "true" if selected else "false")
         self.style().unpolish(self)
