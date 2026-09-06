@@ -60,8 +60,17 @@ if [ -n "$offenders" ]; then
 fi
 echo "OK: no Homebrew references remain in $APP"
 
-echo "==> Ad-hoc code signing"
-codesign --force --deep --sign - "$APP"
+# A stable identity keeps the app's code requirement constant across rebuilds, so a
+# Full Disk Access grant made in System Settings survives; ad-hoc signatures change
+# every build and silently invalidate it.
+IDENTITY="${SALVAGE_SIGN_IDENTITY:-Salvage Dev}"
+if security find-identity -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""; then
+    echo "==> Code signing with identity: $IDENTITY"
+    codesign --force --deep --sign "$IDENTITY" "$APP"
+else
+    echo "==> Ad-hoc code signing (no '$IDENTITY' identity in keychain)"
+    codesign --force --deep --sign - "$APP"
+fi
 
 echo "==> Bundle size"
 du -sh "$APP"
