@@ -25,3 +25,6 @@ include = ["salvage*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "e2e: end-to-end tests that drive the real Qt UI offscreen (slower, still run by default).",
+]

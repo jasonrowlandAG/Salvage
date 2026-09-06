@@ -131,7 +131,10 @@ class BackgroundThumbnailService(QObject):
                 return
             self._done += 1
             done, total = self._done, self._total
-        self.thumb_ready.emit(str(path), cache_path)
+        try:
+            self.thumb_ready.emit(str(path), cache_path)
+        except RuntimeError:
+            pass  # service torn down while a worker was finishing
         self.progress.emit(done, total)
         if done >= total:
             self.finished.emit()
