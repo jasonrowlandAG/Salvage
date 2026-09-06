@@ -8,11 +8,12 @@ those modules have landed.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from salvage.engine.fake import FakeEngine, fake_devices
-from salvage.engine.models import Device, RecoveredFile
+from salvage.engine.models import Device, RecoveredFile, ScanMode, ScanProgress, ScanResult
 
 
 def _fallback_device_from_image(path: Path) -> Device:
@@ -65,31 +66,101 @@ def _fallback_recover_files(
     return written
 
 
+class _ModeRoutingEngine:
+    """Presents PhotoRecEngine + FilesystemEngine as one engine object, picking
+    which to run per `.scan()` call based on the requested ScanMode -- Quick
+    scan reads the filesystem's own deleted-file records (real names, folders,
+    dates); Deep scan carves by signature. This lets the rest of the UI (which
+    holds a single `controller.engine`, chosen once at startup) route each
+    scan without needing to know which mode maps to which class.
+    """
+
+    def __init__(self, filesystem_engine, photorec_engine) -> None:
+        self._filesystem_engine = filesystem_engine
+        self._photorec_engine = photorec_engine
+
+    def scan(
+        self,
+        source,
+        workdir: Path,
+        mode: ScanMode = ScanMode.DEEP,
+        extensions: list[str] | None = None,
+        on_progress: Callable[[ScanProgress], None] | None = None,
+        cancel: threading.Event | None = None,
+    ) -> ScanResult:
+        if mode == ScanMode.QUICK:
+            if self._filesystem_engine is None:
+                return ScanResult(
+                    success=False,
+                    error=(
+                        "Quick scan needs The Sleuth Kit (fls/icat/fsstat/mmls). "
+                        "Install it with `brew install sleuthkit`, or use Deep scan instead."
+                    ),
+                )
+            return self._filesystem_engine.scan(
+                source, workdir, mode=mode, extensions=extensions, on_progress=on_progress, cancel=cancel
+            )
+        if self._photorec_engine is None:
+            return ScanResult(success=False, error="PhotoRec is not installed.")
+        return self._photorec_engine.scan(
+            source, workdir, mode=mode, extensions=extensions, on_progress=on_progress, cancel=cancel
+        )
+
+
+def filesystem_available(fake: bool) -> bool:
+    """Whether Quick scan (FilesystemEngine / Sleuth Kit) can run. Used by
+    OptionsPage to grey out the Quick radio button when the tools aren't
+    installed, rather than letting the user pick it and fail at scan time."""
+    if fake:
+        return True
+    try:
+        from salvage.engine.filesystem import FilesystemEngine
+    except ImportError:
+        return False
+    return FilesystemEngine.locate_binaries() is not None
+
+
 def make_engine(fake: bool):
     """Returns (engine, warning_message | None, needs_binary_dialog: bool)."""
     if fake:
         return FakeEngine(), None, False
 
+    photorec_engine = None
+    needs_binary_dialog = False
     try:
         from salvage.engine.photorec import PhotoRecEngine
     except ImportError as exc:
-        print(f"WARNING: salvage.engine.photorec not available yet ({exc}); using FakeEngine.")
-        return FakeEngine(), None, False
+        print(f"WARNING: salvage.engine.photorec not available yet ({exc}); Deep scan disabled.")
+    else:
+        binary = PhotoRecEngine.locate_binary()
+        if binary is None:
+            # No PhotoRec binary anywhere; let __main__ show the install-prompt dialog.
+            needs_binary_dialog = True
+        else:
+            try:
+                photorec_engine = PhotoRecEngine(binary)
+            except Exception as exc:  # defensive: contract says ctor may raise if unusable
+                print(f"WARNING: could not construct PhotoRecEngine ({exc}); Deep scan disabled.")
 
-    binary = PhotoRecEngine.locate_binary()
-    if binary is None:
-        # No PhotoRec binary anywhere; constructing with None would just raise inside
-        # PhotoRecEngine.__init__ (it re-runs locate_binary()), so don't bother trying -
-        # go straight to FakeEngine and let __main__ show the install-prompt dialog.
-        return FakeEngine(), None, True
-
+    filesystem_engine = None
     try:
-        engine = PhotoRecEngine(binary)
-    except Exception as exc:  # defensive: contract says ctor may raise if unusable
-        print(f"WARNING: could not construct PhotoRecEngine ({exc}); using FakeEngine.")
-        return FakeEngine(), None, False
+        from salvage.engine.filesystem import FilesystemEngine
+    except ImportError as exc:
+        print(f"WARNING: salvage.engine.filesystem not available yet ({exc}); Quick scan disabled.")
+    else:
+        binaries = FilesystemEngine.locate_binaries()
+        if binaries is None:
+            print("WARNING: sleuthkit binaries not found; Quick scan disabled.")
+        else:
+            try:
+                filesystem_engine = FilesystemEngine(binaries)
+            except Exception as exc:
+                print(f"WARNING: could not construct FilesystemEngine ({exc}); Quick scan disabled.")
 
-    return engine, None, False
+    if photorec_engine is None and filesystem_engine is None:
+        return FakeEngine(), None, needs_binary_dialog
+
+    return _ModeRoutingEngine(filesystem_engine, photorec_engine), None, needs_binary_dialog
 
 
 def list_devices(fake: bool) -> list[Device]:

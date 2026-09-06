@@ -60,11 +60,26 @@ class OptionsPage(QWidget):
         mode_title = QLabel("Scan mode")
         mode_title.setStyleSheet("font-weight: 600;")
         mode_layout.addWidget(mode_title)
-        self.quick_radio = QRadioButton("Quick — free space only, fast")
-        self.deep_radio = QRadioButton("Deep — every sector, slow but thorough")
-        self.deep_radio.setChecked(True)
+        self.quick_radio = QRadioButton(
+            "Quick — finds deleted files with their original names and folders; needs an intact filesystem"
+        )
+        self.deep_radio = QRadioButton(
+            "Deep — scans every sector for file signatures; finds more after a format, but names are lost"
+        )
+        self.quick_radio.setChecked(True)
         mode_layout.addWidget(self.quick_radio)
         mode_layout.addWidget(self.deep_radio)
+        self.quick_unavailable_label = QLabel(
+            "Quick scan needs The Sleuth Kit — install with `brew install sleuthkit`."
+        )
+        self.quick_unavailable_label.setProperty("role", "error")
+        self.quick_unavailable_label.setWordWrap(True)
+        self.quick_unavailable_label.hide()
+        mode_layout.addWidget(self.quick_unavailable_label)
+        if not engine_facade.filesystem_available(getattr(self.controller, "fake", False)):
+            self.quick_radio.setEnabled(False)
+            self.deep_radio.setChecked(True)
+            self.quick_unavailable_label.show()
         outer.addWidget(mode_panel)
 
         types_panel = QFrame()
@@ -83,8 +98,7 @@ class OptionsPage(QWidget):
         self.category_checks: dict[str, QCheckBox] = {}
         for cat, label in CATEGORY_LABELS:
             cb = QCheckBox(label)
-            cb.setEnabled(False)
-            cb.stateChanged.connect(self._update_start_enabled)
+            cb.stateChanged.connect(self._on_category_toggled)
             self.category_checks[cat] = cb
             grid.addWidget(cb)
         types_layout.addLayout(grid)
@@ -139,12 +153,24 @@ class OptionsPage(QWidget):
         self._update_start_enabled()
 
     def _on_everything_toggled(self) -> None:
-        checked = self.everything_check.isChecked()
-        for cb in self.category_checks.values():
-            cb.setEnabled(not checked)
-            if checked:
-                cb.setChecked(False)
+        if self.everything_check.isChecked():
+            self._set_categories_checked(False)
         self._update_start_enabled()
+
+    def _on_category_toggled(self) -> None:
+        # Picking a specific type means "not everything"; picking nothing falls back
+        # to Everything so the selection is never empty.
+        any_checked = any(cb.isChecked() for cb in self.category_checks.values())
+        self.everything_check.blockSignals(True)
+        self.everything_check.setChecked(not any_checked)
+        self.everything_check.blockSignals(False)
+        self._update_start_enabled()
+
+    def _set_categories_checked(self, checked: bool) -> None:
+        for cb in self.category_checks.values():
+            cb.blockSignals(True)
+            cb.setChecked(checked)
+            cb.blockSignals(False)
 
     def _browse_destination(self) -> None:
         start_dir = self.dest_edit.text() or str(Path.home())
