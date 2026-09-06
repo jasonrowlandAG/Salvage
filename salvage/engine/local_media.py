@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Literal
 
-from salvage.engine.ios import BackupReader
+from salvage.engine.ios import BackupPasswordError, BackupReader
 from salvage.engine.models import CATEGORY_BY_EXT, Category, category_for
 
 try:
@@ -71,6 +71,7 @@ class MediaSource:
     kind: Literal["folder", "photos_library", "messages", "whatsapp", "ios_backup", "cloud"]
     accessible: bool
     note: str | None = None
+    default_on: bool = True   # False for sources that are slow to even list (on-demand cloud mounts)
 
 
 @dataclass
@@ -200,7 +201,13 @@ def default_sources() -> list[MediaSource]:
         for entry in entries:
             if entry.startswith(".") or not (cloud_storage_root / entry).is_dir():
                 continue
-            add(f"cloudstorage_{entry}", entry, cloud_storage_root / entry, "cloud")
+            src = MediaSource(
+                key=f"cloudstorage_{entry}", label=entry, path=cloud_storage_root / entry, kind="cloud",
+                accessible=os.access(cloud_storage_root / entry, os.R_OK),
+                note="Cloud-only files are fetched on demand — listing is slow; tick to include",
+                default_on=False,
+            )
+            sources.append(src)
 
     pictures_dir = home / "Pictures"
     if pictures_dir.is_dir():
@@ -633,7 +640,9 @@ def _scan_ios_backup(
     missing_basenames = missing_basenames or {}
     try:
         reader = BackupReader(source.path)
-    except (FileNotFoundError, sqlite3.Error):
+        if getattr(reader, "is_encrypted", False):
+            return  # needs a password; the iPhone flow handles encrypted backups
+    except (FileNotFoundError, sqlite3.Error, BackupPasswordError):
         return
     try:
         sms_matches = reader.find(domain="MediaDomain", relative_path_like="Library/SMS/Attachments/%")

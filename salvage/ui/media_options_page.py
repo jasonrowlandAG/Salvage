@@ -60,7 +60,7 @@ class MediaSourceRow(QFrame):
         layout.setSpacing(10)
 
         self.check = QCheckBox()
-        self.check.setChecked(source.accessible)
+        self.check.setChecked(source.accessible and source.default_on)
         self.check.setEnabled(source.accessible)
         layout.addWidget(self.check)
 
