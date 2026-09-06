@@ -37,6 +37,10 @@ except ImportError:  # pragma: no cover - exercised only when the dep is missing
     pass
 
 THUMB_SIZE = 256
+# Larger render used by the preview panel's main view and its "open full size" zoom
+# window — same cache dir and generation logic as THUMB_SIZE, just a bigger target, so
+# it's naturally a different cache entry (the cache key already includes size).
+PREVIEW_SIZE = 2048
 JPEG_QUALITY = 80
 
 CACHE_DIR = Path.home() / "Library" / "Caches" / "Salvage" / "thumbs"
@@ -48,13 +52,16 @@ _QUICKLOOK_EXTS = {
 }
 
 
-def _cache_key(path: Path, size: int, mtime: float) -> str:
-    raw = f"{path}|{size}|{mtime}"
+def _cache_key(path: Path, file_size: int, mtime: float, render_size: int) -> str:
+    # file_size + mtime invalidate the entry when the file's own content changes;
+    # render_size distinguishes the small grid thumbnail from the larger preview render
+    # of the same file, so the two never collide on one cache file.
+    raw = f"{path}|{file_size}|{mtime}|{render_size}"
     return hashlib.sha1(raw.encode("utf-8", errors="surrogateescape")).hexdigest()
 
 
-def _cache_path_for(path: Path, size: int, mtime: float) -> Path:
-    return CACHE_DIR / f"{_cache_key(path, size, mtime)}.jpg"
+def _cache_path_for(path: Path, file_size: int, mtime: float, render_size: int = THUMB_SIZE) -> Path:
+    return CACHE_DIR / f"{_cache_key(path, file_size, mtime, render_size)}.jpg"
 
 
 def get(path: Path) -> Path | None:
@@ -62,16 +69,25 @@ def get(path: Path) -> Path | None:
 
     Does not generate anything — safe to call on cloud placeholders.
     """
+    return _get_sized(path, THUMB_SIZE)
+
+
+def get_preview(path: Path) -> Path | None:
+    """Like `get()` but for the larger `PREVIEW_SIZE` render."""
+    return _get_sized(path, PREVIEW_SIZE)
+
+
+def _get_sized(path: Path, render_size: int) -> Path | None:
     path = Path(path)
     try:
         st = path.stat()
     except OSError:
         return None
-    cache_path = _cache_path_for(path, st.st_size, st.st_mtime)
+    cache_path = _cache_path_for(path, st.st_size, st.st_mtime, render_size)
     return cache_path if cache_path.exists() else None
 
 
-def _generate_with_pillow(path: Path, dest: Path) -> bool:
+def _generate_with_pillow(path: Path, dest: Path, max_size: int = THUMB_SIZE) -> bool:
     try:
         from PIL import Image
     except ImportError:
@@ -79,7 +95,7 @@ def _generate_with_pillow(path: Path, dest: Path) -> bool:
     try:
         with Image.open(path) as im:
             im = im.convert("RGB")
-            im.thumbnail((THUMB_SIZE, THUMB_SIZE))
+            im.thumbnail((max_size, max_size))
             dest.parent.mkdir(parents=True, exist_ok=True)
             tmp = dest.with_suffix(".tmp")
             im.save(tmp, "JPEG", quality=JPEG_QUALITY)
@@ -95,13 +111,13 @@ _QUICKLOOK_TIMEOUT = 8  # seconds. Real-world videos occasionally make qlmanage 
 # worker thread for minutes.
 
 
-def _generate_with_quicklook(path: Path, dest: Path) -> bool:
+def _generate_with_quicklook(path: Path, dest: Path, size: int = THUMB_SIZE) -> bool:
     if shutil.which("qlmanage") is None:
         return False
     with tempfile.TemporaryDirectory() as tmp_dir:
         try:
             subprocess.run(
-                ["qlmanage", "-t", "-s", str(THUMB_SIZE), "-o", tmp_dir, str(path)],
+                ["qlmanage", "-t", "-s", str(size), "-o", tmp_dir, str(path)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=_QUICKLOOK_TIMEOUT, check=False,
             )
         except (OSError, subprocess.SubprocessError):
@@ -111,7 +127,7 @@ def _generate_with_quicklook(path: Path, dest: Path) -> bool:
             produced = [p for p in Path(tmp_dir).iterdir() if p.is_file()]
         if not produced:
             return False
-        return _generate_with_pillow(produced[0], dest)
+        return _generate_with_pillow(produced[0], dest, max_size=size)
 
 
 def generate_batch(paths: list[Path]) -> dict[Path, Path | None]:
@@ -167,31 +183,51 @@ def ensure_for(media) -> Path | None:
     return ensure(media.path)
 
 
+def ensure_preview_for(media) -> Path | None:
+    """Like `ensure_for()`, but generates the larger `PREVIEW_SIZE` render."""
+    if getattr(media, "cloud_placeholder", False):
+        return None
+    return ensure_preview(media.path)
+
+
 def ensure(path: Path) -> Path | None:
     """Returns the cached thumbnail for `path`, generating it if missing.
 
     Never call on a cloud_placeholder FoundMedia — it isn't actually on disk yet.
     Returns None (caller should show a category icon) if nothing could be generated.
     """
+    return _ensure_sized(path, THUMB_SIZE)
+
+
+def ensure_preview(path: Path) -> Path | None:
+    """Like `ensure()`, but generates the larger `PREVIEW_SIZE` render used by the
+    preview panel's main view and its "open full size" zoom window.
+
+    Never call on a cloud_placeholder FoundMedia — it isn't actually on disk yet.
+    """
+    return _ensure_sized(path, PREVIEW_SIZE)
+
+
+def _ensure_sized(path: Path, render_size: int) -> Path | None:
     path = Path(path)
     try:
         st = path.stat()
     except OSError:
         return None
-    dest = _cache_path_for(path, st.st_size, st.st_mtime)
+    dest = _cache_path_for(path, st.st_size, st.st_mtime, render_size)
     if dest.exists():
         return dest
 
     ext = path.suffix.lstrip(".").lower()
     if ext not in _QUICKLOOK_EXTS:
-        if _generate_with_pillow(path, dest):
+        if _generate_with_pillow(path, dest, max_size=render_size):
             return dest
     else:
         # Still worth a Pillow attempt for HEIC/HEIF when pillow_heif is present.
-        if ext in ("heic", "heif") and _generate_with_pillow(path, dest):
+        if ext in ("heic", "heif") and _generate_with_pillow(path, dest, max_size=render_size):
             return dest
 
-    if _generate_with_quicklook(path, dest):
+    if _generate_with_quicklook(path, dest, size=render_size):
         return dest
 
     return None

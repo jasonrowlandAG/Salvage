@@ -21,6 +21,7 @@ exFAT and NTFS keep the full name intact either way.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -31,7 +32,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -175,10 +176,22 @@ def _probe_volumes(binaries: dict[str, Path], source: str) -> list[VolumeInfo]:
         # No partition table mmls recognises -- treat the whole source as one volume.
         partitions = [(0, None, "volume")]
     volumes = []
+    seen_offsets: set[int] = set()
     for offset, length, _desc in partitions:
+        # Defensive de-dup: a hybrid/protective partition table (e.g. a GPT disk
+        # that also carries an MBR "Safety Table") could in principle list the
+        # same underlying volume at the same sector offset twice. Verified this
+        # doesn't happen for fat32/exfat/hfs+/apfs images built by this bench
+        # harness (mmls emits exactly one real partition row per volume in every
+        # case tested), but identity should be keyed on the volume's own offset
+        # -- not "however many rows mmls printed" -- so a filesystem/tool
+        # combination that does duplicate a row can't silently double every scan.
+        if offset in seen_offsets:
+            continue
         vol = _probe_volume(binaries["fsstat"], source, offset, length)
         if vol is not None:
             volumes.append(vol)
+            seen_offsets.add(offset)
     return volumes
 
 
@@ -230,8 +243,27 @@ def _timestamp(field: str) -> datetime | None:
     if value <= 0:
         return None
     try:
-        return datetime.fromtimestamp(value)
+        # `fls -m` (mactime bodyfile) reports Unix epoch seconds, which are
+        # always UTC. Returning a *naive* local-time datetime here (the old
+        # behaviour, via `datetime.fromtimestamp(value)`) silently discarded
+        # that and left every consumer guessing which timezone the wall-clock
+        # numbers were in -- on a host west of UTC that guess is wrong by
+        # exactly the local UTC offset. Attaching tzinfo=utc keeps the value
+        # unambiguous; anything that wants to *display* local time should
+        # call `.astimezone()` on the way out, not assume naive-local here.
+        return datetime.fromtimestamp(value, tz=timezone.utc)
     except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _sha256_file(path: Path) -> str | None:
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
         return None
 
 
@@ -403,6 +435,7 @@ class FilesystemEngine:
             )
 
         files: list[RecoveredFile] = []
+        content_seen: dict[str, int] = {}  # sha256 -> index into `files` of the entry currently kept for it
         start_time = time.monotonic()
         last_emit = 0.0
         cancelled = False
@@ -475,6 +508,16 @@ class FilesystemEngine:
                 else:
                     original_dir, original_name = "", name
 
+                if original_name.startswith("._"):
+                    # macOS AppleDouble sidecar (resource fork / xattr shadow file
+                    # FAT/exFAT can't store natively). Real bench evidence: these
+                    # accounted for exactly half of every "duplicate" result this
+                    # engine returned (one sidecar per corpus file, same deleted
+                    # state, extracted right alongside it) -- never something a
+                    # user asked to recover, so filtered before we bother
+                    # extracting it at all.
+                    continue
+
                 ext = Path(original_name).suffix.lstrip(".").lower()
                 if ext_filter is not None and ext not in ext_filter:
                     continue
@@ -504,23 +547,49 @@ class FilesystemEngine:
                     target.unlink(missing_ok=True)
                     continue
 
-                files.append(
-                    RecoveredFile(
-                        path=target,
-                        name=target.name,
-                        ext=ext,
-                        size=actual_size,
-                        category=category_for(ext),
-                        original_name=original_name,
-                        original_dir=original_dir,
-                        modified=_timestamp(m.group("mtime")),
-                        created=_timestamp(m.group("crtime")) or _timestamp(m.group("ctime")),
-                        deleted=deleted,
-                        inode=inode,
-                        source_engine="sleuthkit",
-                        integrity=Integrity.INTACT if actual_size == size else Integrity.PARTIAL,
-                    )
+                new_entry = RecoveredFile(
+                    path=target,
+                    name=target.name,
+                    ext=ext,
+                    size=actual_size,
+                    category=category_for(ext),
+                    original_name=original_name,
+                    original_dir=original_dir,
+                    modified=_timestamp(m.group("mtime")),
+                    created=_timestamp(m.group("crtime")) or _timestamp(m.group("ctime")),
+                    deleted=deleted,
+                    inode=inode,
+                    source_engine="sleuthkit",
+                    integrity=Integrity.INTACT if actual_size == size else Integrity.PARTIAL,
                 )
+
+                # A rename/move (e.g. a file dragged to the Trash) leaves the file's
+                # *old* directory entry behind as a second deleted record pointing at
+                # the same data -- fls reports both, and both extract identical bytes
+                # via icat. Same content, two inodes: dedupe by content hash so it's
+                # reported once, keeping whichever record was found *later* in this
+                # scan. In practice that's the more recent dirent (a directory added
+                # after the scan's earlier ones, e.g. .Trashes, is walked after the
+                # directories that already existed) -- i.e. the file's last known
+                # location, which is what a user actually wants reported for
+                # something they deleted from the Trash. The tradeoff: FAT/exFAT
+                # rewrite mtime on rename, so the surviving record's mtime reflects
+                # the move, not the file's true original modified time -- documented
+                # in bench/README.md rather than silently "fixed" by guessing.
+                digest = _sha256_file(target)
+                if digest is not None:
+                    prior_index = content_seen.get(digest)
+                    if prior_index is not None:
+                        prior = files[prior_index]
+                        if prior.path != target:
+                            prior.path.unlink(missing_ok=True)
+                        files[prior_index] = new_entry
+                        content_seen[digest] = prior_index
+                        emit(phase)
+                        continue
+                    content_seen[digest] = len(files)
+
+                files.append(new_entry)
                 emit(phase)
 
             if cancelled:

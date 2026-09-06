@@ -14,7 +14,6 @@ from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -31,9 +30,9 @@ from PySide6.QtWidgets import (
 from salvage.engine import thumbcache
 from salvage.engine.local_media import FoundMedia
 from salvage.ui.format_utils import human_size
+from salvage.ui.preview_panel import PreviewPanel
 from salvage.ui.results_page import FileTileDelegate
 from salvage.ui.thumb_service import BackgroundThumbnailService
-from salvage.ui.thumbnails import ThumbnailLoader
 
 FoundMediaRole = Qt.ItemDataRole.UserRole + 1
 BadgeRole = Qt.ItemDataRole.UserRole + 2
@@ -216,9 +215,6 @@ class MediaResultsPage(QWidget):
         self.controller = controller
         self.model: MediaListModel | None = None
         self._source_labels: dict[str, str] = {}
-        self._preview_path: str | None = None
-        self.preview_loader = ThumbnailLoader(self)
-        self.preview_loader.ready.connect(self._on_preview_ready)
         self.thumb_service = BackgroundThumbnailService(self)
         self.thumb_service.thumb_ready.connect(self._on_bg_thumb_ready)
         self.thumb_service.progress.connect(self._on_thumb_progress)
@@ -321,37 +317,8 @@ class MediaResultsPage(QWidget):
         center_widget.setLayout(center)
         body.addWidget(center_widget, 1)
 
-        self.preview_panel = QFrame()
-        self.preview_panel.setProperty("role", "panel")
-        self.preview_panel.setFixedWidth(260)
-        preview_layout = QVBoxLayout(self.preview_panel)
-        self.preview_image = QLabel("Select a file to preview it.")
-        self.preview_image.setProperty("role", "subheading")
-        self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_image.setFixedHeight(180)
-        self.preview_image.setWordWrap(True)
-        preview_layout.addWidget(self.preview_image)
-        self.preview_name = QLabel("")
-        self.preview_name.setWordWrap(True)
-        self.preview_name.setStyleSheet("font-weight: 600;")
-        preview_layout.addWidget(self.preview_name)
-        self.preview_size = QLabel("")
-        self.preview_size.setProperty("role", "subheading")
-        preview_layout.addWidget(self.preview_size)
-        self.preview_taken = QLabel("")
-        self.preview_taken.setProperty("role", "subheading")
-        preview_layout.addWidget(self.preview_taken)
-        self.preview_source = QLabel("")
-        self.preview_source.setProperty("role", "subheading")
-        preview_layout.addWidget(self.preview_source)
-        self.preview_path = QLabel("")
-        self.preview_path.setProperty("role", "subheading")
-        self.preview_path.setWordWrap(True)
-        preview_layout.addWidget(self.preview_path)
-        self.preview_note = QLabel("")
-        self.preview_note.setWordWrap(True)
-        preview_layout.addWidget(self.preview_note)
-        preview_layout.addStretch()
+        self.preview_panel = PreviewPanel(self)
+        self.preview_panel.setFixedWidth(360)
         body.addWidget(self.preview_panel)
 
         outer.addLayout(body, 1)
@@ -394,6 +361,7 @@ class MediaResultsPage(QWidget):
 
     def _go_back(self) -> None:
         self.thumb_service.cancel()
+        self.preview_panel.release()
         self.controller.go_to_media_options()
 
     def _rebuild_sidebars(self) -> None:
@@ -455,47 +423,24 @@ class MediaResultsPage(QWidget):
 
     def _update_preview(self, f: FoundMedia | None) -> None:
         if f is None:
-            self.preview_image.setText("Select a file to preview it.")
-            self.preview_image.setPixmap(QPixmap())
-            self.preview_name.setText("")
-            self.preview_size.setText("")
-            self.preview_taken.setText("")
-            self.preview_source.setText("")
-            self.preview_path.setText("")
-            self.preview_note.setText("")
-            self._preview_path = None
+            self.preview_panel.show_item(None, None)
             return
-        self.preview_name.setText(f.name)
-        self.preview_size.setText(human_size(f.size))
         taken = f.taken.strftime("%d/%m/%Y %H:%M") if f.taken else "Unknown date"
-        self.preview_taken.setText(f"Taken: {taken}")
-        self.preview_source.setText(f"Source: {self._source_labels.get(f.source_key, f.source_key)}")
-        self.preview_path.setText(f"Path: {f.path}")
-        self.preview_note.setText(f.note or "")
-        if f.cloud_placeholder:
-            self._preview_path = None
-            self.preview_image.setPixmap(QPixmap())
-            self.preview_image.setText("Stored in iCloud — open it in Finder to download")
-        elif f.category == "image":
-            self._preview_path = str(f.path)
-            cached = thumbcache.get(f.path)
-            if cached is not None:
-                pixmap = QPixmap(str(cached))
-                if not pixmap.isNull():
-                    self.preview_image.setText("")
-                    self.preview_image.setPixmap(
-                        pixmap.scaled(
-                            240, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-                        )
-                    )
-            else:
-                self.preview_image.setText("Loading preview…")
-                self.preview_image.setPixmap(QPixmap())
-            self.preview_loader.request(f.path, size=240)
-        else:
-            self._preview_path = None
-            self.preview_image.setText("No preview available")
-            self.preview_image.setPixmap(QPixmap())
+        meta_lines = [
+            f"Taken: {taken}",
+            f"Source: {self._source_labels.get(f.source_key, f.source_key)}",
+            f"Path: {f.path}",
+        ]
+        self.preview_panel.show_item(
+            f.path,
+            f.category,
+            name=f.name,
+            size_text=human_size(f.size),
+            meta_lines=meta_lines,
+            note=f.note or "",
+            cloud_placeholder=f.cloud_placeholder,
+            preview_only=f.preview_only,
+        )
 
     def _on_bg_thumb_ready(self, path_str: str, cache_path) -> None:
         if self.model is None or cache_path is None:
@@ -509,14 +454,6 @@ class MediaResultsPage(QWidget):
 
     def _on_thumb_finished(self) -> None:
         pass
-
-    def _on_preview_ready(self, path_str: str, pixmap: QPixmap) -> None:
-        if path_str != self._preview_path:
-            return
-        self.preview_image.setText("")
-        self.preview_image.setPixmap(
-            pixmap.scaled(240, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        )
 
     def _request_visible_thumbnails(self) -> None:
         if self.model is None or self.model.rowCount() == 0:

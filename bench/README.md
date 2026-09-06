@@ -17,8 +17,8 @@ so every future change is scored and regressions are caught - this is that yards
 # full matrix, all filesystems this host can test, all scenarios
 .venv/bin/python -m bench.run --engines photorec --filesystems fat32,exfat,hfs+,apfs --scenarios all
 
-# once salvage.engine.filesystem.FilesystemEngine exists, compare both engines
-.venv/bin/python -m bench.run --engines photorec,filesystem --filesystems fat32,exfat,hfs+,apfs --scenarios all
+# compare all three engines, including CombinedEngine (filesystem + carving merged)
+.venv/bin/python -m bench.run --engines photorec,filesystem,combined --filesystems fat32,exfat,hfs+,apfs --scenarios all
 
 # fast CI-sized run (64MB images, 3 scenarios)
 .venv/bin/python -m bench.run --quick
@@ -162,6 +162,112 @@ SubIFD to detect the file as a JPEG at all**; a flat, SubIFD-less EXIF segment
 its comments) specifically to route around this - which also means the corpus is
 *more* realistic, not less, but it's worth knowing this landmine exists if anyone
 generates test JPEGs a simpler way and gets confused by 0% recall.
+
+## FilesystemEngine bugs found and fixed against real disk images
+
+Three problems showed up in the first real FilesystemEngine run (`bench/results/compare.json`):
+precision pinned at 50% with `junk_count` exactly equal to the expected file count, 0% date
+accuracy, and 15% recall on `delete_folder_tree`/`emptied_trash`. All three were diagnosed by
+building real FAT32/exFAT images with `bench.images`, deleting/moving files, and running
+`fls`/`icat`/`istat` directly against them (not by guessing) - the actual root causes were not
+the ones first suspected.
+
+**1. Precision (junk == expected count): macOS AppleDouble sidecars, not double-counted
+volumes.** The suspicion was that `probe()` scans a volume twice (whole image + partition) or
+that FAT's LFN+8.3 pair produces two entries per file. Neither is true: `mmls`/`fsstat` on every
+image this bench builds (fat32, exfat, hfs+, apfs - GPT and MBR alike) returns exactly one real
+partition row, confirmed by direct inspection. The actual cause: on a FAT32/exFAT volume mounted
+by macOS, every file gets an AppleDouble sidecar (`._IMG_0001.JPG`, 4096 bytes) holding the
+resource fork/xattrs FAT can't store natively. Deleting a file deletes its sidecar too, and
+`fls -r` faithfully reports both as recovered entries - one real, one junk, 1:1, which is exactly
+why `junk_count` always equalled `expected_count`. `FilesystemEngine._scan_impl` now skips any
+entry whose name starts with `._` before ever calling `icat` on it. Separately, `emptied_trash`
+showed *more* junk than sidecars alone explained (9 junk for 3 real files): a rename (move to
+`.Trashes/501`) leaves the file's old directory entry behind as a *second* deleted record
+pointing at the same data - `fls` reports both, `icat` extracts identical bytes from both. The
+engine now hashes every file it extracts and de-duplicates by content within a scan, keeping
+whichever copy was found *later* in the scan (in practice the more recently-added directory,
+e.g. `.Trashes` walked after directories that already existed) - i.e. the file's last known
+location, which is what `emptied_trash` exists to test in the first place. Precision on every
+fat32/exfat scenario is 100% after both fixes (`bench/results/latest.md`). A defensive
+de-duplication-by-offset was also added to `_probe_volumes` in case some filesystem/tool
+combination *does* list the same volume twice - not proven necessary on anything tested here,
+but cheap insurance against the originally-suspected failure mode.
+
+**2. Date accuracy: our engine was the bug, but a real Sleuth Kit limitation remains.**
+`FilesystemEngine._timestamp()` built the `modified` datetime with `datetime.fromtimestamp(value)`
+- no `tzinfo` - even though `fls -m`'s epoch values are UTC. That produced a *naive* datetime
+whose numbers were actually local time, and `bench/score.py`'s tolerance check (reasonably)
+treats a naive datetime as UTC, so every comparison was off by exactly the host's UTC offset
+(confirmed: 39600s = 11h, this host's AEDT offset, reproduced with a two-line repro before
+touching any code). Fixed by returning `datetime.fromtimestamp(value, tz=timezone.utc)` instead
+- this was the engine's bug, not the benchmark's; `_within_tolerance` in `bench/score.py` didn't
+need to change. That fix alone took FAT32 date accuracy from 0% to 30-67% depending on scenario.
+The remainder is a genuine, external Sleuth Kit (Homebrew `sleuthkit` 4.15.0) limitation, not
+something this codebase can honestly fix:
+  - **FAT32**: confirmed via a direct A/B test that macOS's own kernel round-trips a planted FAT
+    timestamp back to the exact correct UTC instant (`os.stat()` on the live mount matches the
+    planted mtime to the second), but `istat`/`fls` on the *identical on-disk bytes* decode a
+    wall-clock time that's off by exactly one hour for any file whose planted date falls in a
+    different DST regime (AEDT vs AEST) than whatever the conversion assumes. Since the corpus
+    spans a full year, roughly half of every fat32 scenario's files land in each regime - hence
+    date accuracy capped around 50% rather than 0% or 100%. `fls -m`'s `-z` flag doesn't apply
+    here ("only useful with -l" per `fls -h`), so there's no supported way to correct this from
+    the command line.
+  - **exFAT**: worse, and different - exFAT timestamps carry their own explicit UTC-offset byte
+    per spec, but this Sleuth Kit build's exFAT decoder is off by a large, roughly-constant
+    ~20-21 hours regardless of DST (verified across six files with known planted mtimes), driving
+    date accuracy to 0% on every exFAT scenario. This isn't a timezone-naive-vs-aware ambiguity
+    of the kind our own code had - it's baked into what `fls -m` reports.
+  Reverse-engineering and hand-compensating for either bug in this codebase would mean silently
+  assuming a specific third-party tool's internal arithmetic mistake, which breaks (or inverts)
+  the moment Homebrew ships a fixed `sleuthkit`. Documenting it honestly here instead.
+
+**3. 15% recall on `delete_folder_tree`/`emptied_trash`: not a missing orphan scan.** The
+suspicion was that `fls -r`'s recursive walk misses children of a removed directory and needs a
+supplementary orphan scan (`fls -O`, or walking `$OrphanFiles`). Neither holds up: `fls -O` isn't
+even a flag this Sleuth Kit build supports (`fls -h` has no `-O`), and after `rmtree`-ing
+`Documents/Reports`, `fls -r -p` already lists all three files inside it correctly, each marked
+`(deleted)`, each extracting byte-identical via `icat` - `$OrphanFiles` comes back empty because
+nothing is actually orphaned in this scenario. **The real explanation:** `expected_count` in
+`bench/score.py` is always every corpus file (20), regardless of whether a given scenario deleted
+it, and `FilesystemEngine` (matching "Quick scan only reports what's actually deleted", the real
+product behaviour) only returns entries flagged deleted. `delete_folder_tree` only deletes 3/20
+files - so 15% recall (3/20) is FilesystemEngine correctly recovering *100% of what was actually
+deleted*, not a partial recovery. This is the ceiling for a filesystem-only scan on these
+scenarios, not a bug to chase further; `CombinedEngine` (below) is what actually raises recall on
+partially-deleted volumes, by adding carving's recall (which doesn't care about deleted-vs-live)
+on top of the filesystem stage's accurate names/dates.
+
+## CombinedEngine: filesystem records first, then a full carve
+
+`salvage/engine/combined.py` runs `FilesystemEngine.scan()` first (fast, named, accurate dates
+for what it can reach) and `PhotoRecEngine.scan()` second into a separate sub-workdir (slow,
+unnamed, but doesn't care whether something was deleted, formatted away, or fragmented), then
+merges by content: a carved file that's byte-identical to a filesystem-recovered file is dropped
+(the named copy wins), and everything else carving found is kept as extra, unnamed recall.
+Hashing is the expensive part with thousands of carved files, so it's cheap by construction: a
+carved file can only match a filesystem file of the *same size* (skip hashing everything else),
+and whatever's left is hashed across a thread pool rather than one file at a time.
+
+Before vs after (fat32/exfat, `bench/results/after_fixes.json`):
+
+| Scenario | Engine | Recall | Precision | Name | Date |
+|---|---|---|---|---|---|
+| delete_folder_tree (fat32) | filesystem alone | 15% | 100% | 33% | 67% |
+| delete_folder_tree (fat32) | **combined** | **90%** | **100%** | 6% | 11% |
+| emptied_trash (fat32) | filesystem alone | 15% | 100% | 0% | 0% |
+| emptied_trash (fat32) | **combined** | **90%** | **100%** | 0% | 0% |
+| quick_format (fat32) | filesystem alone | 60% | 100% | 100% | 58% |
+| quick_format (fat32) | **combined** | **75%** | **100%** | 80% | 47% |
+
+Combined recall approaches PhotoRec's own ceiling (carving supplies whatever the filesystem
+stage couldn't reach) while precision stays at 100% (no sidecar/duplicate junk, same as the fixed
+FilesystemEngine) and name/date accuracy stay well above PhotoRec alone (0% on both, always,
+since a pure carver never has a name or a filesystem-derived date to offer) wherever the
+filesystem stage found a match. `CombinedEngine` reports success even when the filesystem stage
+fails outright (e.g. a quick-formatted volume) as long as carving still runs - it only reports a
+real error when *both* stages fail.
 
 ## Tests
 

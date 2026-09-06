@@ -8,7 +8,6 @@ from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QRect, QSize
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -26,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from salvage.engine.models import Category, RecoveredFile, ScanResult
 from salvage.ui.format_utils import human_size
+from salvage.ui.preview_panel import PreviewPanel
 from salvage.ui.thumbnails import ThumbnailLoader
 
 PathRole = Qt.ItemDataRole.UserRole + 1
@@ -201,11 +201,8 @@ class ResultsPage(QWidget):
         self.controller = controller
         self.model: FileListModel | None = None
         self._current_category: str | None = None
-        self._preview_path: str | None = None
         self.thumb_loader = ThumbnailLoader(self)
         self.thumb_loader.ready.connect(self._on_thumb_ready)
-        self.preview_loader = ThumbnailLoader(self)
-        self.preview_loader.ready.connect(self._on_preview_ready)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -271,34 +268,15 @@ class ResultsPage(QWidget):
         center_widget.setLayout(center)
         body.addWidget(center_widget, 1)
 
-        self.preview_panel = QFrame()
-        self.preview_panel.setProperty("role", "panel")
-        self.preview_panel.setFixedWidth(240)
-        preview_layout = QVBoxLayout(self.preview_panel)
-        self.preview_image = QLabel("Select a file to preview it.")
-        self.preview_image.setProperty("role", "subheading")
-        self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_image.setFixedHeight(180)
-        self.preview_image.setWordWrap(True)
-        preview_layout.addWidget(self.preview_image)
-        self.preview_name = QLabel("")
-        self.preview_name.setWordWrap(True)
-        self.preview_name.setStyleSheet("font-weight: 600;")
-        preview_layout.addWidget(self.preview_name)
-        self.preview_size = QLabel("")
-        self.preview_size.setProperty("role", "subheading")
-        preview_layout.addWidget(self.preview_size)
-        self.preview_offset = QLabel("")
-        self.preview_offset.setProperty("role", "subheading")
-        preview_layout.addWidget(self.preview_offset)
-        preview_layout.addStretch()
+        self.preview_panel = PreviewPanel(self)
+        self.preview_panel.setFixedWidth(340)
         body.addWidget(self.preview_panel)
 
         outer.addLayout(body, 1)
 
         bottom_row = QHBoxLayout()
         back_btn = QPushButton("Back")
-        back_btn.clicked.connect(lambda: self.controller.go_to_options(self.controller.session.device))
+        back_btn.clicked.connect(self._go_back)
         bottom_row.addWidget(back_btn)
         bottom_row.addStretch()
         outer.addLayout(bottom_row)
@@ -357,37 +335,20 @@ class ResultsPage(QWidget):
 
     def _update_preview(self, f: RecoveredFile | None) -> None:
         if f is None:
-            self.preview_image.setText("Select a file to preview it.")
-            self.preview_image.setPixmap(QPixmap())
-            self.preview_name.setText("")
-            self.preview_size.setText("")
-            self.preview_offset.setText("")
-            self._preview_path = None
+            self.preview_panel.show_item(None, None)
             return
-        self.preview_name.setText(f.name)
-        self.preview_size.setText(human_size(f.size))
-        self.preview_offset.setText(f"Offset: {f.offset:,}" if f.offset is not None else "Offset: unknown")
-        if f.category == "image":
-            self._preview_path = str(f.path)
-            self.preview_image.setText("Loading preview…")
-            self.preview_image.setPixmap(QPixmap())
-            self.preview_loader.request(f.path, size=220)
-        else:
-            self._preview_path = None
-            self.preview_image.setText("No preview available")
-            self.preview_image.setPixmap(QPixmap())
+        meta_lines = [f"Offset: {f.offset:,}" if f.offset is not None else "Offset: unknown"]
+        self.preview_panel.show_item(
+            f.path, f.category, name=f.name, size_text=human_size(f.size), meta_lines=meta_lines
+        )
 
     def _on_thumb_ready(self, path_str: str, pixmap: QPixmap) -> None:
         if self.model is not None:
             self.model.set_thumbnail(path_str, pixmap)
 
-    def _on_preview_ready(self, path_str: str, pixmap: QPixmap) -> None:
-        if path_str != self._preview_path:
-            return
-        self.preview_image.setText("")
-        self.preview_image.setPixmap(
-            pixmap.scaled(220, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        )
+    def _go_back(self) -> None:
+        self.preview_panel.release()
+        self.controller.go_to_options(self.controller.session.device)
 
     def _select_all_filtered(self) -> None:
         if self.model is not None:

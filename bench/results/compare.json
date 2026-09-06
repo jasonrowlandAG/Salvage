@@ -13,7 +13,7 @@
     "returned_count": 17,
     "junk_count": 0,
     "junk_bytes": 0,
-    "elapsed_s": 0.058420458997716196,
+    "elapsed_s": 0.08320158300193725,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -74,86 +74,16 @@
     "scenario": "delete_all",
     "fs": "fat32",
     "recall": 1.0,
-    "precision": 1.0,
+    "precision": 0.5,
     "name_accuracy": 0.3,
     "path_accuracy": 1.0,
-    "date_accuracy": 0.55,
+    "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 20,
-    "returned_count": 20,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.3309666249988368,
-    "by_ext": {
-      "docx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "heic": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "jpg": {
-        "expected": 6,
-        "recovered": 6,
-        "recall": 1.0
-      },
-      "mp3": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "mp4": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "pdf": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "png": {
-        "expected": 3,
-        "recovered": 3,
-        "recall": 1.0
-      },
-      "txt": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "xlsx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "zip": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      }
-    },
-    "error": null,
-    "notes": ""
-  },
-  {
-    "engine": "combined",
-    "scenario": "delete_all",
-    "fs": "fat32",
-    "recall": 1.0,
-    "precision": 1.0,
-    "name_accuracy": 0.3,
-    "path_accuracy": 1.0,
-    "date_accuracy": 0.55,
-    "expected_count": 20,
-    "recovered_true_positives": 20,
-    "returned_count": 20,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.4181279580006958,
+    "returned_count": 40,
+    "junk_count": 20,
+    "junk_bytes": 81920,
+    "elapsed_s": 0.548881208000239,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -223,7 +153,7 @@
     "returned_count": 17,
     "junk_count": 0,
     "junk_bytes": 0,
-    "elapsed_s": 0.0485945839973283,
+    "elapsed_s": 0.06864299999870127,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -284,16 +214,16 @@
     "scenario": "delete_subset",
     "fs": "fat32",
     "recall": 0.5,
-    "precision": 1.0,
+    "precision": 0.5,
     "name_accuracy": 0.3,
     "path_accuracy": 1.0,
-    "date_accuracy": 0.6,
+    "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 10,
-    "returned_count": 10,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.19477337500575231,
+    "returned_count": 20,
+    "junk_count": 10,
+    "junk_bytes": 40960,
+    "elapsed_s": 0.28667487500206335,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -350,76 +280,6 @@
     "notes": ""
   },
   {
-    "engine": "combined",
-    "scenario": "delete_subset",
-    "fs": "fat32",
-    "recall": 0.95,
-    "precision": 1.0,
-    "name_accuracy": 0.15789473684210525,
-    "path_accuracy": 0.5263157894736842,
-    "date_accuracy": 0.3157894736842105,
-    "expected_count": 20,
-    "recovered_true_positives": 19,
-    "returned_count": 19,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.23235016599937808,
-    "by_ext": {
-      "docx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "heic": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "jpg": {
-        "expected": 6,
-        "recovered": 6,
-        "recall": 1.0
-      },
-      "mp3": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "mp4": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "pdf": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "png": {
-        "expected": 3,
-        "recovered": 3,
-        "recall": 1.0
-      },
-      "txt": {
-        "expected": 2,
-        "recovered": 1,
-        "recall": 0.5
-      },
-      "xlsx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "zip": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      }
-    },
-    "error": null,
-    "notes": ""
-  },
-  {
     "engine": "photorec",
     "scenario": "delete_folder_tree",
     "fs": "fat32",
@@ -433,7 +293,7 @@
     "returned_count": 17,
     "junk_count": 0,
     "junk_bytes": 0,
-    "elapsed_s": 0.048813707995577715,
+    "elapsed_s": 0.05572887500602519,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -494,16 +354,16 @@
     "scenario": "delete_folder_tree",
     "fs": "fat32",
     "recall": 0.15,
-    "precision": 1.0,
+    "precision": 0.5,
     "name_accuracy": 0.3333333333333333,
     "path_accuracy": 1.0,
-    "date_accuracy": 0.6666666666666666,
+    "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 3,
-    "returned_count": 3,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.09114175000286195,
+    "returned_count": 6,
+    "junk_count": 3,
+    "junk_bytes": 12288,
+    "elapsed_s": 0.11839891700219596,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -554,76 +414,6 @@
         "expected": 1,
         "recovered": 0,
         "recall": 0.0
-      }
-    },
-    "error": null,
-    "notes": "rm -r Documents/Reports"
-  },
-  {
-    "engine": "combined",
-    "scenario": "delete_folder_tree",
-    "fs": "fat32",
-    "recall": 0.9,
-    "precision": 1.0,
-    "name_accuracy": 0.05555555555555555,
-    "path_accuracy": 0.16666666666666666,
-    "date_accuracy": 0.1111111111111111,
-    "expected_count": 20,
-    "recovered_true_positives": 18,
-    "returned_count": 18,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.13645333399472293,
-    "by_ext": {
-      "docx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "heic": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "jpg": {
-        "expected": 6,
-        "recovered": 6,
-        "recall": 1.0
-      },
-      "mp3": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "mp4": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "pdf": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "png": {
-        "expected": 3,
-        "recovered": 2,
-        "recall": 0.6666666666666666
-      },
-      "txt": {
-        "expected": 2,
-        "recovered": 1,
-        "recall": 0.5
-      },
-      "xlsx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "zip": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
       }
     },
     "error": null,
@@ -643,7 +433,7 @@
     "returned_count": 13,
     "junk_count": 0,
     "junk_bytes": 0,
-    "elapsed_s": 0.04862325000431156,
+    "elapsed_s": 0.048373500001616776,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -704,16 +494,16 @@
     "scenario": "quick_format",
     "fs": "fat32",
     "recall": 0.6,
-    "precision": 1.0,
+    "precision": 0.5,
     "name_accuracy": 1.0,
     "path_accuracy": 0.0,
-    "date_accuracy": 0.5833333333333334,
+    "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 12,
-    "returned_count": 12,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.2163150409978698,
+    "returned_count": 24,
+    "junk_count": 12,
+    "junk_bytes": 49152,
+    "elapsed_s": 0.3203627080001752,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -729,76 +519,6 @@
         "expected": 6,
         "recovered": 0,
         "recall": 0.0
-      },
-      "mp3": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "mp4": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "pdf": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "png": {
-        "expected": 3,
-        "recovered": 3,
-        "recall": 1.0
-      },
-      "txt": {
-        "expected": 2,
-        "recovered": 1,
-        "recall": 0.5
-      },
-      "xlsx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "zip": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      }
-    },
-    "error": null,
-    "notes": "filesystem metadata was replaced by the reformat; name/path accuracy here measures whether an engine can dig up remnants of the old metadata, not just carve data"
-  },
-  {
-    "engine": "combined",
-    "scenario": "quick_format",
-    "fs": "fat32",
-    "recall": 0.75,
-    "precision": 1.0,
-    "name_accuracy": 0.8,
-    "path_accuracy": 0.0,
-    "date_accuracy": 0.4666666666666667,
-    "expected_count": 20,
-    "recovered_true_positives": 15,
-    "returned_count": 15,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.2594764160021441,
-    "by_ext": {
-      "docx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "heic": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "jpg": {
-        "expected": 6,
-        "recovered": 2,
-        "recall": 0.3333333333333333
       },
       "mp3": {
         "expected": 2,
@@ -853,7 +573,7 @@
     "returned_count": 17,
     "junk_count": 0,
     "junk_bytes": 0,
-    "elapsed_s": 0.04658366600051522,
+    "elapsed_s": 0.0318243750007241,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -914,86 +634,16 @@
     "scenario": "partial_overwrite",
     "fs": "fat32",
     "recall": 1.0,
-    "precision": 1.0,
+    "precision": 0.5,
     "name_accuracy": 0.3,
     "path_accuracy": 1.0,
-    "date_accuracy": 0.55,
+    "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 20,
-    "returned_count": 20,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.3281754159979755,
-    "by_ext": {
-      "docx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "heic": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "jpg": {
-        "expected": 6,
-        "recovered": 6,
-        "recall": 1.0
-      },
-      "mp3": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "mp4": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "pdf": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "png": {
-        "expected": 3,
-        "recovered": 3,
-        "recall": 1.0
-      },
-      "txt": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "xlsx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "zip": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      }
-    },
-    "error": null,
-    "notes": "overwrote 25165824 bytes (25% of the volume) starting at offset 52419831; ground truth was computed by re-scanning the raw image for each file's exact bytes after the overwrite, not by guessing"
-  },
-  {
-    "engine": "combined",
-    "scenario": "partial_overwrite",
-    "fs": "fat32",
-    "recall": 1.0,
-    "precision": 1.0,
-    "name_accuracy": 0.3,
-    "path_accuracy": 1.0,
-    "date_accuracy": 0.55,
-    "expected_count": 20,
-    "recovered_true_positives": 20,
-    "returned_count": 20,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.3718575839957339,
+    "returned_count": 40,
+    "junk_count": 20,
+    "junk_bytes": 81920,
+    "elapsed_s": 0.4829465830043773,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -1063,7 +713,7 @@
     "returned_count": 20,
     "junk_count": 3,
     "junk_bytes": 6238150,
-    "elapsed_s": 0.06541191699943738,
+    "elapsed_s": 0.05987295800150605,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -1124,16 +774,16 @@
     "scenario": "fragmentation",
     "fs": "fat32",
     "recall": 0.15,
-    "precision": 1.0,
+    "precision": 0.5,
     "name_accuracy": 0.0,
     "path_accuracy": 1.0,
-    "date_accuracy": 0.3333333333333333,
+    "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 3,
-    "returned_count": 3,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.12351533300534356,
+    "returned_count": 6,
+    "junk_count": 3,
+    "junk_bytes": 12288,
+    "elapsed_s": 0.11908762500388548,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -1190,76 +840,6 @@
     "notes": "deliberately fragmented then deleted: ['Videos/Clips/clip_01.mp4', 'Videos/Clips/clip_02.mp4', 'DCIM/100APPLE/IMG_0006.JPG']"
   },
   {
-    "engine": "combined",
-    "scenario": "fragmentation",
-    "fs": "fat32",
-    "recall": 0.85,
-    "precision": 1.0,
-    "name_accuracy": 0.0,
-    "path_accuracy": 0.17647058823529413,
-    "date_accuracy": 0.058823529411764705,
-    "expected_count": 20,
-    "recovered_true_positives": 17,
-    "returned_count": 17,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.18922229199961293,
-    "by_ext": {
-      "docx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "heic": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "jpg": {
-        "expected": 6,
-        "recovered": 6,
-        "recall": 1.0
-      },
-      "mp3": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "mp4": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "pdf": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "png": {
-        "expected": 3,
-        "recovered": 2,
-        "recall": 0.6666666666666666
-      },
-      "txt": {
-        "expected": 2,
-        "recovered": 0,
-        "recall": 0.0
-      },
-      "xlsx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "zip": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      }
-    },
-    "error": null,
-    "notes": "deliberately fragmented then deleted: ['Videos/Clips/clip_01.mp4', 'Videos/Clips/clip_02.mp4', 'DCIM/100APPLE/IMG_0006.JPG']"
-  },
-  {
     "engine": "photorec",
     "scenario": "emptied_trash",
     "fs": "fat32",
@@ -1273,7 +853,7 @@
     "returned_count": 17,
     "junk_count": 0,
     "junk_bytes": 0,
-    "elapsed_s": 0.05197387500084005,
+    "elapsed_s": 0.05247570900246501,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -1334,16 +914,16 @@
     "scenario": "emptied_trash",
     "fs": "fat32",
     "recall": 0.15,
-    "precision": 1.0,
+    "precision": 0.25,
     "name_accuracy": 0.0,
-    "path_accuracy": 1.0,
+    "path_accuracy": 0.0,
     "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 3,
-    "returned_count": 3,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.1312815419951221,
+    "returned_count": 12,
+    "junk_count": 9,
+    "junk_bytes": 699202,
+    "elapsed_s": 0.17974745800165692,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -1400,76 +980,6 @@
     "notes": "moved to .Trashes/501 then deleted: ['DCIM/100APPLE/IMG_0002.JPG', 'Music/song_01.mp3', 'Documents/notes.txt']"
   },
   {
-    "engine": "combined",
-    "scenario": "emptied_trash",
-    "fs": "fat32",
-    "recall": 0.9,
-    "precision": 1.0,
-    "name_accuracy": 0.0,
-    "path_accuracy": 0.16666666666666666,
-    "date_accuracy": 0.0,
-    "expected_count": 20,
-    "recovered_true_positives": 18,
-    "returned_count": 18,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.1693277919985121,
-    "by_ext": {
-      "docx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "heic": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "jpg": {
-        "expected": 6,
-        "recovered": 6,
-        "recall": 1.0
-      },
-      "mp3": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "mp4": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "pdf": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "png": {
-        "expected": 3,
-        "recovered": 2,
-        "recall": 0.6666666666666666
-      },
-      "txt": {
-        "expected": 2,
-        "recovered": 1,
-        "recall": 0.5
-      },
-      "xlsx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "zip": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      }
-    },
-    "error": null,
-    "notes": "moved to .Trashes/501 then deleted: ['DCIM/100APPLE/IMG_0002.JPG', 'Music/song_01.mp3', 'Documents/notes.txt']"
-  },
-  {
     "engine": "photorec",
     "scenario": "delete_all",
     "fs": "exfat",
@@ -1483,7 +993,7 @@
     "returned_count": 18,
     "junk_count": 0,
     "junk_bytes": 0,
-    "elapsed_s": 0.045167374999437016,
+    "elapsed_s": 0.05142899999918882,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -1544,86 +1054,16 @@
     "scenario": "delete_all",
     "fs": "exfat",
     "recall": 1.0,
-    "precision": 1.0,
+    "precision": 0.5,
     "name_accuracy": 1.0,
     "path_accuracy": 1.0,
     "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 20,
-    "returned_count": 20,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.29966000000422355,
-    "by_ext": {
-      "docx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "heic": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "jpg": {
-        "expected": 6,
-        "recovered": 6,
-        "recall": 1.0
-      },
-      "mp3": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "mp4": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "pdf": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "png": {
-        "expected": 3,
-        "recovered": 3,
-        "recall": 1.0
-      },
-      "txt": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "xlsx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "zip": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      }
-    },
-    "error": null,
-    "notes": ""
-  },
-  {
-    "engine": "combined",
-    "scenario": "delete_all",
-    "fs": "exfat",
-    "recall": 1.0,
-    "precision": 1.0,
-    "name_accuracy": 1.0,
-    "path_accuracy": 1.0,
-    "date_accuracy": 0.0,
-    "expected_count": 20,
-    "recovered_true_positives": 20,
-    "returned_count": 20,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.3216960409990861,
+    "returned_count": 40,
+    "junk_count": 20,
+    "junk_bytes": 81920,
+    "elapsed_s": 0.45309858299879124,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -1693,7 +1133,7 @@
     "returned_count": 18,
     "junk_count": 0,
     "junk_bytes": 0,
-    "elapsed_s": 0.04415920800238382,
+    "elapsed_s": 0.048835500005225185,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -1754,16 +1194,16 @@
     "scenario": "delete_subset",
     "fs": "exfat",
     "recall": 0.5,
-    "precision": 1.0,
+    "precision": 0.5,
     "name_accuracy": 1.0,
     "path_accuracy": 1.0,
     "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 10,
-    "returned_count": 10,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.162919750000583,
+    "returned_count": 20,
+    "junk_count": 10,
+    "junk_bytes": 40960,
+    "elapsed_s": 0.24071858300158055,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -1820,76 +1260,6 @@
     "notes": ""
   },
   {
-    "engine": "combined",
-    "scenario": "delete_subset",
-    "fs": "exfat",
-    "recall": 0.95,
-    "precision": 1.0,
-    "name_accuracy": 0.5263157894736842,
-    "path_accuracy": 0.5263157894736842,
-    "date_accuracy": 0.0,
-    "expected_count": 20,
-    "recovered_true_positives": 19,
-    "returned_count": 19,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.2036670410016086,
-    "by_ext": {
-      "docx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "heic": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "jpg": {
-        "expected": 6,
-        "recovered": 6,
-        "recall": 1.0
-      },
-      "mp3": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "mp4": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "pdf": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "png": {
-        "expected": 3,
-        "recovered": 3,
-        "recall": 1.0
-      },
-      "txt": {
-        "expected": 2,
-        "recovered": 1,
-        "recall": 0.5
-      },
-      "xlsx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "zip": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      }
-    },
-    "error": null,
-    "notes": ""
-  },
-  {
     "engine": "photorec",
     "scenario": "delete_folder_tree",
     "fs": "exfat",
@@ -1903,7 +1273,7 @@
     "returned_count": 18,
     "junk_count": 0,
     "junk_bytes": 0,
-    "elapsed_s": 0.05050920900248457,
+    "elapsed_s": 0.05160445899673505,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -1964,16 +1334,16 @@
     "scenario": "delete_folder_tree",
     "fs": "exfat",
     "recall": 0.15,
-    "precision": 1.0,
+    "precision": 0.5,
     "name_accuracy": 1.0,
     "path_accuracy": 1.0,
     "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 3,
-    "returned_count": 3,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.07158870899729664,
+    "returned_count": 6,
+    "junk_count": 3,
+    "junk_bytes": 12288,
+    "elapsed_s": 0.09689308400265872,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -2024,76 +1394,6 @@
         "expected": 1,
         "recovered": 0,
         "recall": 0.0
-      }
-    },
-    "error": null,
-    "notes": "rm -r Documents/Reports"
-  },
-  {
-    "engine": "combined",
-    "scenario": "delete_folder_tree",
-    "fs": "exfat",
-    "recall": 0.95,
-    "precision": 1.0,
-    "name_accuracy": 0.15789473684210525,
-    "path_accuracy": 0.15789473684210525,
-    "date_accuracy": 0.0,
-    "expected_count": 20,
-    "recovered_true_positives": 19,
-    "returned_count": 19,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.155188625001756,
-    "by_ext": {
-      "docx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "heic": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "jpg": {
-        "expected": 6,
-        "recovered": 6,
-        "recall": 1.0
-      },
-      "mp3": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "mp4": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "pdf": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "png": {
-        "expected": 3,
-        "recovered": 3,
-        "recall": 1.0
-      },
-      "txt": {
-        "expected": 2,
-        "recovered": 1,
-        "recall": 0.5
-      },
-      "xlsx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "zip": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
       }
     },
     "error": null,
@@ -2113,7 +1413,7 @@
     "returned_count": 12,
     "junk_count": 0,
     "junk_bytes": 0,
-    "elapsed_s": 0.041435125000134576,
+    "elapsed_s": 0.036291791999246925,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -2174,16 +1474,16 @@
     "scenario": "quick_format",
     "fs": "exfat",
     "recall": 0.5,
-    "precision": 1.0,
+    "precision": 0.5,
     "name_accuracy": 1.0,
     "path_accuracy": 0.0,
     "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 10,
-    "returned_count": 10,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.1825815420015715,
+    "returned_count": 20,
+    "junk_count": 10,
+    "junk_bytes": 40960,
+    "elapsed_s": 0.2435310830041999,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -2204,76 +1504,6 @@
         "expected": 2,
         "recovered": 0,
         "recall": 0.0
-      },
-      "mp4": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "pdf": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "png": {
-        "expected": 3,
-        "recovered": 3,
-        "recall": 1.0
-      },
-      "txt": {
-        "expected": 2,
-        "recovered": 1,
-        "recall": 0.5
-      },
-      "xlsx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "zip": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      }
-    },
-    "error": null,
-    "notes": "filesystem metadata was replaced by the reformat; name/path accuracy here measures whether an engine can dig up remnants of the old metadata, not just carve data"
-  },
-  {
-    "engine": "combined",
-    "scenario": "quick_format",
-    "fs": "exfat",
-    "recall": 0.65,
-    "precision": 1.0,
-    "name_accuracy": 0.7692307692307693,
-    "path_accuracy": 0.0,
-    "date_accuracy": 0.0,
-    "expected_count": 20,
-    "recovered_true_positives": 13,
-    "returned_count": 13,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.195933041999524,
-    "by_ext": {
-      "docx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "heic": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "jpg": {
-        "expected": 6,
-        "recovered": 0,
-        "recall": 0.0
-      },
-      "mp3": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
       },
       "mp4": {
         "expected": 2,
@@ -2323,7 +1553,7 @@
     "returned_count": 18,
     "junk_count": 0,
     "junk_bytes": 0,
-    "elapsed_s": 0.035048417004873045,
+    "elapsed_s": 0.03168362499854993,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -2384,86 +1614,16 @@
     "scenario": "partial_overwrite",
     "fs": "exfat",
     "recall": 1.0,
-    "precision": 1.0,
+    "precision": 0.5,
     "name_accuracy": 1.0,
     "path_accuracy": 1.0,
     "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 20,
-    "returned_count": 20,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.2803461250005057,
-    "by_ext": {
-      "docx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "heic": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "jpg": {
-        "expected": 6,
-        "recovered": 6,
-        "recall": 1.0
-      },
-      "mp3": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "mp4": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "pdf": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "png": {
-        "expected": 3,
-        "recovered": 3,
-        "recall": 1.0
-      },
-      "txt": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "xlsx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "zip": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      }
-    },
-    "error": null,
-    "notes": "overwrote 25165824 bytes (25% of the volume) starting at offset 52419831; ground truth was computed by re-scanning the raw image for each file's exact bytes after the overwrite, not by guessing"
-  },
-  {
-    "engine": "combined",
-    "scenario": "partial_overwrite",
-    "fs": "exfat",
-    "recall": 1.0,
-    "precision": 1.0,
-    "name_accuracy": 1.0,
-    "path_accuracy": 1.0,
-    "date_accuracy": 0.0,
-    "expected_count": 20,
-    "recovered_true_positives": 20,
-    "returned_count": 20,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.3396376250020694,
+    "returned_count": 40,
+    "junk_count": 20,
+    "junk_bytes": 81920,
+    "elapsed_s": 0.4690330419980455,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -2533,7 +1693,7 @@
     "returned_count": 21,
     "junk_count": 3,
     "junk_bytes": 6238150,
-    "elapsed_s": 0.06336920800094958,
+    "elapsed_s": 0.06883329099946423,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -2594,16 +1754,16 @@
     "scenario": "fragmentation",
     "fs": "exfat",
     "recall": 0.15,
-    "precision": 1.0,
+    "precision": 0.5,
     "name_accuracy": 1.0,
     "path_accuracy": 1.0,
     "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 3,
-    "returned_count": 3,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.11209891700127628,
+    "returned_count": 6,
+    "junk_count": 3,
+    "junk_bytes": 12288,
+    "elapsed_s": 0.12363624999852618,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -2654,76 +1814,6 @@
         "expected": 1,
         "recovered": 0,
         "recall": 0.0
-      }
-    },
-    "error": null,
-    "notes": "deliberately fragmented then deleted: ['Videos/Clips/clip_01.mp4', 'Videos/Clips/clip_02.mp4', 'DCIM/100APPLE/IMG_0006.JPG']"
-  },
-  {
-    "engine": "combined",
-    "scenario": "fragmentation",
-    "fs": "exfat",
-    "recall": 0.9,
-    "precision": 1.0,
-    "name_accuracy": 0.16666666666666666,
-    "path_accuracy": 0.16666666666666666,
-    "date_accuracy": 0.0,
-    "expected_count": 20,
-    "recovered_true_positives": 18,
-    "returned_count": 18,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.1691490419980255,
-    "by_ext": {
-      "docx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "heic": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "jpg": {
-        "expected": 6,
-        "recovered": 6,
-        "recall": 1.0
-      },
-      "mp3": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "mp4": {
-        "expected": 2,
-        "recovered": 2,
-        "recall": 1.0
-      },
-      "pdf": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "png": {
-        "expected": 3,
-        "recovered": 3,
-        "recall": 1.0
-      },
-      "txt": {
-        "expected": 2,
-        "recovered": 0,
-        "recall": 0.0
-      },
-      "xlsx": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
-      },
-      "zip": {
-        "expected": 1,
-        "recovered": 1,
-        "recall": 1.0
       }
     },
     "error": null,
@@ -2743,7 +1833,7 @@
     "returned_count": 18,
     "junk_count": 0,
     "junk_bytes": 0,
-    "elapsed_s": 0.0713960830034921,
+    "elapsed_s": 0.0484083340052166,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -2804,16 +1894,16 @@
     "scenario": "emptied_trash",
     "fs": "exfat",
     "recall": 0.15,
-    "precision": 1.0,
+    "precision": 0.25,
     "name_accuracy": 1.0,
-    "path_accuracy": 1.0,
+    "path_accuracy": 0.0,
     "date_accuracy": 0.0,
     "expected_count": 20,
     "recovered_true_positives": 3,
-    "returned_count": 3,
-    "junk_count": 0,
-    "junk_bytes": 0,
-    "elapsed_s": 0.10750258399639279,
+    "returned_count": 12,
+    "junk_count": 9,
+    "junk_bytes": 699202,
+    "elapsed_s": 0.18837845799862407,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -2870,20 +1960,720 @@
     "notes": "moved to .Trashes/501 then deleted: ['DCIM/100APPLE/IMG_0002.JPG', 'Music/song_01.mp3', 'Documents/notes.txt']"
   },
   {
-    "engine": "combined",
-    "scenario": "emptied_trash",
-    "fs": "exfat",
-    "recall": 0.95,
-    "precision": 1.0,
-    "name_accuracy": 0.15789473684210525,
-    "path_accuracy": 0.15789473684210525,
+    "engine": "photorec",
+    "scenario": "delete_all",
+    "fs": "hfs+",
+    "recall": 0.85,
+    "precision": 0.9444444444444444,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
     "date_accuracy": 0.0,
     "expected_count": 20,
-    "recovered_true_positives": 19,
-    "returned_count": 19,
+    "recovered_true_positives": 17,
+    "returned_count": 18,
+    "junk_count": 1,
+    "junk_bytes": 1200156,
+    "elapsed_s": 0.042752208006277215,
+    "by_ext": {
+      "docx": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "heic": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "jpg": {
+        "expected": 6,
+        "recovered": 6,
+        "recall": 1.0
+      },
+      "mp3": {
+        "expected": 2,
+        "recovered": 2,
+        "recall": 1.0
+      },
+      "mp4": {
+        "expected": 2,
+        "recovered": 1,
+        "recall": 0.5
+      },
+      "pdf": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "png": {
+        "expected": 3,
+        "recovered": 3,
+        "recall": 1.0
+      },
+      "txt": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "xlsx": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "zip": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      }
+    },
+    "error": null,
+    "notes": ""
+  },
+  {
+    "engine": "filesystem",
+    "scenario": "delete_all",
+    "fs": "hfs+",
+    "recall": 0.0,
+    "precision": 0.0,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
+    "date_accuracy": 0.0,
+    "expected_count": 20,
+    "recovered_true_positives": 0,
+    "returned_count": 0,
     "junk_count": 0,
     "junk_bytes": 0,
-    "elapsed_s": 0.146391209003923,
+    "elapsed_s": 0.025012792000779882,
+    "by_ext": {
+      "docx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "heic": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "jpg": {
+        "expected": 6,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp3": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp4": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "pdf": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "png": {
+        "expected": 3,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "txt": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "xlsx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "zip": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      }
+    },
+    "error": null,
+    "notes": ""
+  },
+  {
+    "engine": "photorec",
+    "scenario": "delete_subset",
+    "fs": "hfs+",
+    "recall": 0.85,
+    "precision": 0.9444444444444444,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
+    "date_accuracy": 0.0,
+    "expected_count": 20,
+    "recovered_true_positives": 17,
+    "returned_count": 18,
+    "junk_count": 1,
+    "junk_bytes": 1200156,
+    "elapsed_s": 0.044112083000072744,
+    "by_ext": {
+      "docx": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "heic": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "jpg": {
+        "expected": 6,
+        "recovered": 6,
+        "recall": 1.0
+      },
+      "mp3": {
+        "expected": 2,
+        "recovered": 2,
+        "recall": 1.0
+      },
+      "mp4": {
+        "expected": 2,
+        "recovered": 1,
+        "recall": 0.5
+      },
+      "pdf": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "png": {
+        "expected": 3,
+        "recovered": 3,
+        "recall": 1.0
+      },
+      "txt": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "xlsx": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "zip": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      }
+    },
+    "error": null,
+    "notes": ""
+  },
+  {
+    "engine": "filesystem",
+    "scenario": "delete_subset",
+    "fs": "hfs+",
+    "recall": 0.0,
+    "precision": 0.0,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
+    "date_accuracy": 0.0,
+    "expected_count": 20,
+    "recovered_true_positives": 0,
+    "returned_count": 0,
+    "junk_count": 0,
+    "junk_bytes": 0,
+    "elapsed_s": 0.024349459003133234,
+    "by_ext": {
+      "docx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "heic": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "jpg": {
+        "expected": 6,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp3": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp4": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "pdf": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "png": {
+        "expected": 3,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "txt": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "xlsx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "zip": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      }
+    },
+    "error": null,
+    "notes": ""
+  },
+  {
+    "engine": "photorec",
+    "scenario": "delete_folder_tree",
+    "fs": "hfs+",
+    "recall": 0.85,
+    "precision": 0.9444444444444444,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
+    "date_accuracy": 0.0,
+    "expected_count": 20,
+    "recovered_true_positives": 17,
+    "returned_count": 18,
+    "junk_count": 1,
+    "junk_bytes": 1200156,
+    "elapsed_s": 0.045555791999504436,
+    "by_ext": {
+      "docx": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "heic": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "jpg": {
+        "expected": 6,
+        "recovered": 6,
+        "recall": 1.0
+      },
+      "mp3": {
+        "expected": 2,
+        "recovered": 2,
+        "recall": 1.0
+      },
+      "mp4": {
+        "expected": 2,
+        "recovered": 1,
+        "recall": 0.5
+      },
+      "pdf": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "png": {
+        "expected": 3,
+        "recovered": 3,
+        "recall": 1.0
+      },
+      "txt": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "xlsx": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "zip": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      }
+    },
+    "error": null,
+    "notes": "rm -r Documents/Reports"
+  },
+  {
+    "engine": "filesystem",
+    "scenario": "delete_folder_tree",
+    "fs": "hfs+",
+    "recall": 0.0,
+    "precision": 0.0,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
+    "date_accuracy": 0.0,
+    "expected_count": 20,
+    "recovered_true_positives": 0,
+    "returned_count": 0,
+    "junk_count": 0,
+    "junk_bytes": 0,
+    "elapsed_s": 0.023458666997612454,
+    "by_ext": {
+      "docx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "heic": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "jpg": {
+        "expected": 6,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp3": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp4": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "pdf": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "png": {
+        "expected": 3,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "txt": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "xlsx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "zip": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      }
+    },
+    "error": null,
+    "notes": "rm -r Documents/Reports"
+  },
+  {
+    "engine": "photorec",
+    "scenario": "quick_format",
+    "fs": "hfs+",
+    "recall": 0.8,
+    "precision": 0.9411764705882353,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
+    "date_accuracy": 0.0,
+    "expected_count": 20,
+    "recovered_true_positives": 16,
+    "returned_count": 17,
+    "junk_count": 1,
+    "junk_bytes": 1200156,
+    "elapsed_s": 0.07697220900445245,
+    "by_ext": {
+      "docx": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "heic": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "jpg": {
+        "expected": 6,
+        "recovered": 5,
+        "recall": 0.8333333333333334
+      },
+      "mp3": {
+        "expected": 2,
+        "recovered": 2,
+        "recall": 1.0
+      },
+      "mp4": {
+        "expected": 2,
+        "recovered": 1,
+        "recall": 0.5
+      },
+      "pdf": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "png": {
+        "expected": 3,
+        "recovered": 3,
+        "recall": 1.0
+      },
+      "txt": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "xlsx": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "zip": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      }
+    },
+    "error": null,
+    "notes": "filesystem metadata was replaced by the reformat; name/path accuracy here measures whether an engine can dig up remnants of the old metadata, not just carve data"
+  },
+  {
+    "engine": "filesystem",
+    "scenario": "quick_format",
+    "fs": "hfs+",
+    "recall": 0.0,
+    "precision": 0.0,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
+    "date_accuracy": 0.0,
+    "expected_count": 20,
+    "recovered_true_positives": 0,
+    "returned_count": 0,
+    "junk_count": 0,
+    "junk_bytes": 0,
+    "elapsed_s": 0.03007195799727924,
+    "by_ext": {
+      "docx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "heic": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "jpg": {
+        "expected": 6,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp3": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp4": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "pdf": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "png": {
+        "expected": 3,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "txt": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "xlsx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "zip": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      }
+    },
+    "error": null,
+    "notes": "filesystem metadata was replaced by the reformat; name/path accuracy here measures whether an engine can dig up remnants of the old metadata, not just carve data"
+  },
+  {
+    "engine": "photorec",
+    "scenario": "partial_overwrite",
+    "fs": "hfs+",
+    "recall": 0.8947368421052632,
+    "precision": 0.9444444444444444,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
+    "date_accuracy": 0.0,
+    "expected_count": 19,
+    "recovered_true_positives": 17,
+    "returned_count": 18,
+    "junk_count": 1,
+    "junk_bytes": 1200156,
+    "elapsed_s": 0.027472916997794528,
+    "by_ext": {
+      "docx": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "heic": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "jpg": {
+        "expected": 6,
+        "recovered": 6,
+        "recall": 1.0
+      },
+      "mp3": {
+        "expected": 2,
+        "recovered": 2,
+        "recall": 1.0
+      },
+      "mp4": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "pdf": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "png": {
+        "expected": 3,
+        "recovered": 3,
+        "recall": 1.0
+      },
+      "txt": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "xlsx": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "zip": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      }
+    },
+    "error": null,
+    "notes": "overwrote 25165824 bytes (25% of the volume) starting at offset 52419831; ground truth was computed by re-scanning the raw image for each file's exact bytes after the overwrite, not by guessing"
+  },
+  {
+    "engine": "filesystem",
+    "scenario": "partial_overwrite",
+    "fs": "hfs+",
+    "recall": 0.0,
+    "precision": 0.0,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
+    "date_accuracy": 0.0,
+    "expected_count": 19,
+    "recovered_true_positives": 0,
+    "returned_count": 0,
+    "junk_count": 0,
+    "junk_bytes": 0,
+    "elapsed_s": 0.022296000002825167,
+    "by_ext": {
+      "docx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "heic": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "jpg": {
+        "expected": 6,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp3": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp4": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "pdf": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "png": {
+        "expected": 3,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "txt": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "xlsx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "zip": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      }
+    },
+    "error": null,
+    "notes": "overwrote 25165824 bytes (25% of the volume) starting at offset 52419831; ground truth was computed by re-scanning the raw image for each file's exact bytes after the overwrite, not by guessing"
+  },
+  {
+    "engine": "photorec",
+    "scenario": "fragmentation",
+    "fs": "hfs+",
+    "recall": 0.9,
+    "precision": 0.8571428571428571,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
+    "date_accuracy": 0.0,
+    "expected_count": 20,
+    "recovered_true_positives": 18,
+    "returned_count": 21,
+    "junk_count": 3,
+    "junk_bytes": 6238150,
+    "elapsed_s": 0.05099458400218282,
     "by_ext": {
       "docx": {
         "expected": 1,
@@ -2922,8 +2712,8 @@
       },
       "txt": {
         "expected": 2,
-        "recovered": 1,
-        "recall": 0.5
+        "recovered": 0,
+        "recall": 0.0
       },
       "xlsx": {
         "expected": 1,
@@ -2934,6 +2724,216 @@
         "expected": 1,
         "recovered": 1,
         "recall": 1.0
+      }
+    },
+    "error": null,
+    "notes": "deliberately fragmented then deleted: ['Videos/Clips/clip_01.mp4', 'Videos/Clips/clip_02.mp4', 'DCIM/100APPLE/IMG_0006.JPG']"
+  },
+  {
+    "engine": "filesystem",
+    "scenario": "fragmentation",
+    "fs": "hfs+",
+    "recall": 0.0,
+    "precision": 0.0,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
+    "date_accuracy": 0.0,
+    "expected_count": 20,
+    "recovered_true_positives": 0,
+    "returned_count": 0,
+    "junk_count": 0,
+    "junk_bytes": 0,
+    "elapsed_s": 0.024675165994267445,
+    "by_ext": {
+      "docx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "heic": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "jpg": {
+        "expected": 6,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp3": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp4": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "pdf": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "png": {
+        "expected": 3,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "txt": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "xlsx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "zip": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      }
+    },
+    "error": null,
+    "notes": "deliberately fragmented then deleted: ['Videos/Clips/clip_01.mp4', 'Videos/Clips/clip_02.mp4', 'DCIM/100APPLE/IMG_0006.JPG']"
+  },
+  {
+    "engine": "photorec",
+    "scenario": "emptied_trash",
+    "fs": "hfs+",
+    "recall": 0.85,
+    "precision": 0.9444444444444444,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
+    "date_accuracy": 0.0,
+    "expected_count": 20,
+    "recovered_true_positives": 17,
+    "returned_count": 18,
+    "junk_count": 1,
+    "junk_bytes": 1200156,
+    "elapsed_s": 0.04554658299457515,
+    "by_ext": {
+      "docx": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "heic": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "jpg": {
+        "expected": 6,
+        "recovered": 6,
+        "recall": 1.0
+      },
+      "mp3": {
+        "expected": 2,
+        "recovered": 2,
+        "recall": 1.0
+      },
+      "mp4": {
+        "expected": 2,
+        "recovered": 1,
+        "recall": 0.5
+      },
+      "pdf": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "png": {
+        "expected": 3,
+        "recovered": 3,
+        "recall": 1.0
+      },
+      "txt": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "xlsx": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      },
+      "zip": {
+        "expected": 1,
+        "recovered": 1,
+        "recall": 1.0
+      }
+    },
+    "error": null,
+    "notes": "moved to .Trashes/501 then deleted: ['DCIM/100APPLE/IMG_0002.JPG', 'Music/song_01.mp3', 'Documents/notes.txt']"
+  },
+  {
+    "engine": "filesystem",
+    "scenario": "emptied_trash",
+    "fs": "hfs+",
+    "recall": 0.0,
+    "precision": 0.0,
+    "name_accuracy": 0.0,
+    "path_accuracy": 0.0,
+    "date_accuracy": 0.0,
+    "expected_count": 20,
+    "recovered_true_positives": 0,
+    "returned_count": 0,
+    "junk_count": 0,
+    "junk_bytes": 0,
+    "elapsed_s": 0.024069875005807262,
+    "by_ext": {
+      "docx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "heic": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "jpg": {
+        "expected": 6,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp3": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "mp4": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "pdf": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "png": {
+        "expected": 3,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "txt": {
+        "expected": 2,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "xlsx": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
+      },
+      "zip": {
+        "expected": 1,
+        "recovered": 0,
+        "recall": 0.0
       }
     },
     "error": null,

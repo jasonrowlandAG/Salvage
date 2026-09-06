@@ -33,8 +33,13 @@ try:
 except ImportError:
     FilesystemEngine = None  # not built yet - skip gracefully everywhere below
 
+try:
+    from salvage.engine.combined import CombinedEngine  # type: ignore[import-not-found]
+except ImportError:
+    CombinedEngine = None  # not built yet - skip gracefully everywhere below
+
 ALL_FILESYSTEMS = ["fat32", "exfat", "hfs+", "apfs"]  # ntfs excluded - see bench/README.md
-ALL_ENGINES = ["photorec", "filesystem"]
+ALL_ENGINES = ["photorec", "filesystem", "combined"]
 QUICK_SCENARIOS = ("delete_all", "delete_subset", "quick_format")
 
 QUICK_SIZE_MB = 64
@@ -64,12 +69,17 @@ def _engine_factory(name: str):
         return PhotoRecEngine()
     if name == "filesystem":
         return None if FilesystemEngine is None else FilesystemEngine()
+    if name == "combined":
+        if CombinedEngine is None:
+            return None
+        filesystem_engine = None if FilesystemEngine is None else FilesystemEngine()
+        return CombinedEngine(filesystem_engine, PhotoRecEngine())
     raise ValueError(f"unknown engine {name!r}; choose from {ALL_ENGINES}")
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Salvage recovery-accuracy benchmark harness")
-    p.add_argument("--engines", default="photorec", help="comma-separated: photorec,filesystem")
+    p.add_argument("--engines", default="photorec", help="comma-separated: photorec,filesystem,combined")
     p.add_argument("--filesystems", default=",".join(ALL_FILESYSTEMS))
     p.add_argument("--scenarios", default="all")
     p.add_argument("--out", type=Path, default=None)

@@ -24,6 +24,7 @@ def category_for(ext: str) -> Category:
 class ScanMode(Enum):
     QUICK = "freespace"   # carve only unallocated space (fast; needs a recognised filesystem)
     DEEP = "wholespace"   # carve every sector of the source
+    THOROUGH = "thorough"  # filesystem records first, then a full carve (CombinedEngine); PhotoRec never sees this value
 
 
 @dataclass(frozen=True)

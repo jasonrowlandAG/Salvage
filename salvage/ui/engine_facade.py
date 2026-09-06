@@ -67,17 +67,19 @@ def _fallback_recover_files(
 
 
 class _ModeRoutingEngine:
-    """Presents PhotoRecEngine + FilesystemEngine as one engine object, picking
-    which to run per `.scan()` call based on the requested ScanMode -- Quick
-    scan reads the filesystem's own deleted-file records (real names, folders,
-    dates); Deep scan carves by signature. This lets the rest of the UI (which
-    holds a single `controller.engine`, chosen once at startup) route each
-    scan without needing to know which mode maps to which class.
+    """Presents PhotoRecEngine + FilesystemEngine + CombinedEngine as one engine
+    object, picking which to run per `.scan()` call based on the requested
+    ScanMode -- Quick scan reads the filesystem's own deleted-file records (real
+    names, folders, dates); Deep scan carves by signature; Thorough scan runs
+    both (CombinedEngine) for the best of each. This lets the rest of the UI
+    (which holds a single `controller.engine`, chosen once at startup) route
+    each scan without needing to know which mode maps to which class.
     """
 
-    def __init__(self, filesystem_engine, photorec_engine) -> None:
+    def __init__(self, filesystem_engine, photorec_engine, combined_engine=None) -> None:
         self._filesystem_engine = filesystem_engine
         self._photorec_engine = photorec_engine
+        self._combined_engine = combined_engine
 
     def scan(
         self,
@@ -88,6 +90,18 @@ class _ModeRoutingEngine:
         on_progress: Callable[[ScanProgress], None] | None = None,
         cancel: threading.Event | None = None,
     ) -> ScanResult:
+        if mode == ScanMode.THOROUGH:
+            if self._combined_engine is None:
+                return ScanResult(
+                    success=False,
+                    error=(
+                        "Thorough scan needs both The Sleuth Kit and PhotoRec installed. "
+                        "Install `brew install sleuthkit testdisk`, or use Quick/Deep scan instead."
+                    ),
+                )
+            return self._combined_engine.scan(
+                source, workdir, mode=mode, extensions=extensions, on_progress=on_progress, cancel=cancel
+            )
         if mode == ScanMode.QUICK:
             if self._filesystem_engine is None:
                 return ScanResult(
@@ -160,7 +174,18 @@ def make_engine(fake: bool):
     if photorec_engine is None and filesystem_engine is None:
         return FakeEngine(), None, needs_binary_dialog
 
-    return _ModeRoutingEngine(filesystem_engine, photorec_engine), None, needs_binary_dialog
+    combined_engine = None
+    if photorec_engine is not None or filesystem_engine is not None:
+        # Thorough scan degrades gracefully with just one sub-engine present --
+        # CombinedEngine itself only reports "both stages failed" if neither ran.
+        try:
+            from salvage.engine.combined import CombinedEngine
+        except ImportError as exc:
+            print(f"WARNING: salvage.engine.combined not available yet ({exc}); Thorough scan disabled.")
+        else:
+            combined_engine = CombinedEngine(filesystem_engine, photorec_engine)
+
+    return _ModeRoutingEngine(filesystem_engine, photorec_engine, combined_engine), None, needs_binary_dialog
 
 
 def list_devices(fake: bool) -> list[Device]:

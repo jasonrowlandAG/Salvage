@@ -66,9 +66,13 @@ class OptionsPage(QWidget):
         self.deep_radio = QRadioButton(
             "Deep — scans every sector for file signatures; finds more after a format, but names are lost"
         )
-        self.quick_radio.setChecked(True)
+        self.thorough_radio = QRadioButton(
+            "Thorough — filesystem records first, then every sector (best results, slowest)"
+        )
+        self.thorough_radio.setChecked(True)
         mode_layout.addWidget(self.quick_radio)
         mode_layout.addWidget(self.deep_radio)
+        mode_layout.addWidget(self.thorough_radio)
         self.quick_unavailable_label = QLabel(
             "Quick scan needs The Sleuth Kit — install with `brew install sleuthkit`."
         )
@@ -77,8 +81,10 @@ class OptionsPage(QWidget):
         self.quick_unavailable_label.hide()
         mode_layout.addWidget(self.quick_unavailable_label)
         if not engine_facade.filesystem_available(getattr(self.controller, "fake", False)):
+            # Quick itself is unavailable without Sleuth Kit, but Thorough (the
+            # default) degrades gracefully to carving-only via CombinedEngine,
+            # so it's left checked rather than forced over to Deep.
             self.quick_radio.setEnabled(False)
-            self.deep_radio.setChecked(True)
             self.quick_unavailable_label.show()
         outer.addWidget(mode_panel)
 
@@ -212,5 +218,10 @@ class OptionsPage(QWidget):
         self.start_btn.setEnabled(bool(dest_ok and types_ok))
 
     def _start_scan(self) -> None:
-        mode = ScanMode.QUICK if self.quick_radio.isChecked() else ScanMode.DEEP
+        if self.quick_radio.isChecked():
+            mode = ScanMode.QUICK
+        elif self.thorough_radio.isChecked():
+            mode = ScanMode.THOROUGH
+        else:
+            mode = ScanMode.DEEP
         self.controller.go_to_scan(mode, self._selected_extensions(), self._destination)

@@ -18,12 +18,25 @@ block_cipher = None
 project_root = Path(SPEC).resolve().parent.parent  # noqa: F821
 entry_script = project_root / "salvage" / "__main__.py"
 
+# QtMultimedia/QtMultimediaWidgets back the preview panel's video/audio playback
+# (salvage/ui/preview_panel.py). PyInstaller's PySide6 hooks (add_qt6_dependencies) already
+# walk the real dependency graph and correctly pull in the "multimedia" plugin directory
+# (libffmpegmediaplugin.dylib + libdarwinmediaplugin.dylib) and the FFmpeg shared libraries
+# it links against (libavformat/libavcodec/libavutil/libswscale/libswresample) — verified by
+# inspecting a built dist/Salvage.app, launching it, and playing a real video through it.
+# These two are already detected automatically because preview_panel.py imports them at
+# module level, but they're listed explicitly anyway: PyInstaller can only discover a plugin
+# category for a Qt module it has actually traced into the dependency graph, so if a future
+# refactor moves these imports somewhere PyInstaller's static analysis can't see (e.g. behind
+# a runtime conditional), the multimedia backend would silently disappear from the build.
+_hiddenimports = ["PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets"]
+
 a = Analysis(
     [str(entry_script)],
     pathex=[str(project_root)],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -65,9 +78,12 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name="Salvage.app",
-    icon=None,
+    icon='packaging/assets/Salvage.icns',
     bundle_identifier="com.salvage.app",
     info_plist={
+        'LSApplicationCategoryType': 'public.app-category.utilities',
+        'CFBundleDisplayName': 'Salvage',
+        'NSHumanReadableCopyright': 'MIT licensed. Bundles PhotoRec (GPLv2) and libimobiledevice (LGPL).',
         "NSHighResolutionCapable": True,
         "CFBundleName": "Salvage",
         "CFBundleDisplayName": "Salvage",
