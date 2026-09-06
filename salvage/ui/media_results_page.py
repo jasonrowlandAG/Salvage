@@ -28,9 +28,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from salvage.engine import thumbcache
 from salvage.engine.local_media import FoundMedia
 from salvage.ui.format_utils import human_size
 from salvage.ui.results_page import FileTileDelegate
+from salvage.ui.thumb_service import BackgroundThumbnailService
 from salvage.ui.thumbnails import ThumbnailLoader
 
 FoundMediaRole = Qt.ItemDataRole.UserRole + 1
@@ -215,10 +217,12 @@ class MediaResultsPage(QWidget):
         self.model: MediaListModel | None = None
         self._source_labels: dict[str, str] = {}
         self._preview_path: str | None = None
-        self.thumb_loader = ThumbnailLoader(self)
-        self.thumb_loader.ready.connect(self._on_thumb_ready)
         self.preview_loader = ThumbnailLoader(self)
         self.preview_loader.ready.connect(self._on_preview_ready)
+        self.thumb_service = BackgroundThumbnailService(self)
+        self.thumb_service.thumb_ready.connect(self._on_bg_thumb_ready)
+        self.thumb_service.progress.connect(self._on_thumb_progress)
+        self.thumb_service.finished.connect(self._on_thumb_finished)
         self._thumb_timer = QTimer(self)
         self._thumb_timer.setSingleShot(True)
         self._thumb_timer.setInterval(120)
@@ -296,6 +300,9 @@ class MediaResultsPage(QWidget):
         footer_row = QHBoxLayout()
         self.footer_label = QLabel("0 selected · 0 B")
         footer_row.addWidget(self.footer_label)
+        self.thumb_progress_label = QLabel("")
+        self.thumb_progress_label.setProperty("role", "subheading")
+        footer_row.addWidget(self.thumb_progress_label)
         footer_row.addStretch()
         select_all_btn = QPushButton("Select all (filtered)")
         select_all_btn.clicked.connect(self._select_all_filtered)
@@ -351,7 +358,7 @@ class MediaResultsPage(QWidget):
 
         bottom_row = QHBoxLayout()
         back_btn = QPushButton("Back")
-        back_btn.clicked.connect(self.controller.go_to_media_options)
+        back_btn.clicked.connect(self._go_back)
         bottom_row.addWidget(back_btn)
         bottom_row.addStretch()
         outer.addLayout(bottom_row)
@@ -379,6 +386,15 @@ class MediaResultsPage(QWidget):
         self._rebuild_sidebars()
         self._apply_filters()
         self._update_preview(None)
+
+        thumbable = [f.path for f in items if not f.cloud_placeholder and f.category in ("image", "video")]
+        self.thumb_progress_label.setText(f"Thumbnails 0 / {len(thumbable):,}" if thumbable else "")
+        self.thumb_service.start(thumbable)
+        self._thumb_timer.start()
+
+    def _go_back(self) -> None:
+        self.thumb_service.cancel()
+        self.controller.go_to_media_options()
 
     def _rebuild_sidebars(self) -> None:
         assert self.model is not None
@@ -462,17 +478,37 @@ class MediaResultsPage(QWidget):
             self.preview_image.setText("Stored in iCloud — open it in Finder to download")
         elif f.category == "image":
             self._preview_path = str(f.path)
-            self.preview_image.setText("Loading preview…")
-            self.preview_image.setPixmap(QPixmap())
+            cached = thumbcache.get(f.path)
+            if cached is not None:
+                pixmap = QPixmap(str(cached))
+                if not pixmap.isNull():
+                    self.preview_image.setText("")
+                    self.preview_image.setPixmap(
+                        pixmap.scaled(
+                            240, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+                        )
+                    )
+            else:
+                self.preview_image.setText("Loading preview…")
+                self.preview_image.setPixmap(QPixmap())
             self.preview_loader.request(f.path, size=240)
         else:
             self._preview_path = None
             self.preview_image.setText("No preview available")
             self.preview_image.setPixmap(QPixmap())
 
-    def _on_thumb_ready(self, path_str: str, pixmap: QPixmap) -> None:
-        if self.model is not None:
+    def _on_bg_thumb_ready(self, path_str: str, cache_path) -> None:
+        if self.model is None or cache_path is None:
+            return
+        pixmap = QPixmap(str(cache_path))
+        if not pixmap.isNull():
             self.model.set_thumbnail(path_str, pixmap)
+
+    def _on_thumb_progress(self, done: int, total: int) -> None:
+        self.thumb_progress_label.setText(f"Thumbnails {done:,} / {total:,}")
+
+    def _on_thumb_finished(self) -> None:
+        pass
 
     def _on_preview_ready(self, path_str: str, pixmap: QPixmap) -> None:
         if path_str != self._preview_path:
@@ -494,14 +530,21 @@ class MediaResultsPage(QWidget):
         margin = 40
         start_row = max(0, start_row - margin)
         end_row = min(self.model.rowCount() - 1, end_row + margin)
+        visible_paths = []
         for row in range(start_row, end_row + 1):
             f = self.model.data(self.model.index(row), FoundMediaRole)
-            if f is None:
+            if f is None or f.cloud_placeholder or f.category not in ("image", "video"):
                 continue
-            if f.cloud_placeholder:
+            if str(f.path) in self.model._thumbs:
                 continue
-            if f.category in ("image", "video") and str(f.path) not in self.model._thumbs:
-                self.thumb_loader.request(f.path)
+            visible_paths.append(f.path)
+            cached = thumbcache.get(f.path)
+            if cached is not None:
+                pixmap = QPixmap(str(cached))
+                if not pixmap.isNull():
+                    self.model.set_thumbnail(str(f.path), pixmap)
+        if visible_paths:
+            self.thumb_service.prioritize(visible_paths)
 
     def _select_all_filtered(self) -> None:
         if self.model is not None:

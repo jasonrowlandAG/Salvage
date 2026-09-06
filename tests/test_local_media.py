@@ -224,6 +224,57 @@ def test_scan_photos_library_marks_recently_deleted(tmp_path):
     by_uuid = {fm.path.stem: fm for fm in results}
     assert by_uuid[trashed_uuid].in_recently_deleted is True
     assert by_uuid[kept_uuid].in_recently_deleted is False
+    assert by_uuid[trashed_uuid].preview_only is False
+    assert by_uuid[kept_uuid].preview_only is False
+
+
+def _make_icloud_optimised_photos_library(root: Path) -> tuple[Path, str]:
+    """An iCloud-optimised library: `originals/` exists but is empty for this asset — only
+    downsized preview derivatives are actually on disk, the way Jay's real library looks."""
+    lib = root / "Optimised.photoslibrary"
+    (lib / "originals" / "B").mkdir(parents=True)
+    (lib / "database").mkdir(parents=True)
+    (lib / "resources" / "derivatives" / "B").mkdir(parents=True)
+    (lib / "resources" / "derivatives" / "masters" / "B").mkdir(parents=True)
+
+    uuid = "BBBB1111-2222-3333-4444-555555555555"
+    # A small low-quality legacy thumbnail and a larger, better preview — the scan must
+    # pick the larger one.
+    (lib / "resources" / "derivatives" / "masters" / "B" / f"{uuid}_4_5005_c.jpeg").write_bytes(b"x" * 50)
+    (lib / "resources" / "derivatives" / "B" / f"{uuid}_1_105_c.jpeg").write_bytes(b"y" * 500)
+    # A transcode slice that must never be picked even though it's larger.
+    (lib / "resources" / "derivatives" / "B" / f"{uuid}_cvt_t0000.jpeg").write_bytes(b"z" * 5000)
+
+    conn = sqlite3.connect(lib / "database" / "Photos.sqlite")
+    conn.execute(
+        "CREATE TABLE ZASSET (Z_PK INTEGER PRIMARY KEY, ZUUID TEXT, ZFILENAME TEXT, "
+        "ZDIRECTORY TEXT, ZDATECREATED REAL, ZKIND INTEGER, ZTRASHEDSTATE INTEGER, ZFAVORITE INTEGER)"
+    )
+    taken_core_data = datetime(2023, 8, 1, 10, 0, 0).timestamp() - lm._CORE_DATA_EPOCH_OFFSET
+    conn.execute(
+        "INSERT INTO ZASSET (ZUUID, ZFILENAME, ZDIRECTORY, ZDATECREATED, ZKIND, ZTRASHEDSTATE, ZFAVORITE) "
+        "VALUES (?, ?, ?, ?, 0, 0, 1)",
+        (uuid, "IMG_9999.HEIC", "20230801/somewhere", taken_core_data),
+    )
+    conn.commit()
+    conn.close()
+    return lib, uuid
+
+
+def test_scan_photos_library_falls_back_to_largest_derivative_when_optimised(tmp_path):
+    lib, uuid = _make_icloud_optimised_photos_library(tmp_path)
+    source = MediaSource(key="photos", label="Photos Library", path=lib, kind="photos_library", accessible=True)
+
+    results = scan_sources([source], hash_dupes=False)
+
+    assert len(results) == 1
+    fm = results[0]
+    assert fm.preview_only is True
+    assert fm.name == "IMG_9999.HEIC"  # original filename preserved even though we use a preview
+    assert fm.path.name.endswith("_1_105_c.jpeg")  # the larger, non-cvt derivative was picked
+    assert fm.note == "Original is in iCloud Photos — only a preview is on this Mac"
+    assert fm.category == "image"
+    assert fm.taken == datetime(2023, 8, 1, 10, 0, 0)
 
 
 # ---------------------------------------------------------------------------

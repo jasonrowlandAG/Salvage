@@ -90,6 +90,7 @@ class FoundMedia:
     note: str | None = None
     recovered: bool = False
     cloud_placeholder: bool = False   # iCloud file not downloaded; reading it would trigger a download
+    preview_only: bool = False        # Photos library original is iCloud-only; `path` is a local preview derivative
 
 
 @dataclass
@@ -483,20 +484,24 @@ def _safe_mtime(mtime: float) -> datetime | None:
 # ---------------------------------------------------------------------------
 
 
-def _load_photos_trash_state(lib_root: Path) -> tuple[dict[str, bool], dict[str, bool]]:
-    """Returns (trashed_by_uuid_lower, trashed_by_filename_lower).
+_CORE_DATA_EPOCH_OFFSET = 978307200  # seconds between 2001-01-01 (Core Data reference date) and 1970-01-01
 
-    Real Photos libraries store originals at originals/<first-uuid-char>/<UUID>.<ext>
-    with ZASSET.ZUUID matching the UUID; older (pre-High-Sierra) libraries use
-    Masters/<date>/<original filename> with no UUID, so ZFILENAME is the fallback key.
-    The live database is locked (WAL) while Photos.app may have it open, so we always
-    work off a copy.
+_PHOTOS_ASSET_COLUMNS = ("ZUUID", "ZFILENAME", "ZDIRECTORY", "ZDATECREATED", "ZKIND", "ZTRASHEDSTATE", "ZFAVORITE")
+
+
+def _photos_asset_rows(lib_root: Path) -> list[dict]:
+    """Reads every ZASSET row (one per photo/video Photos knows about) off a copy of the DB.
+
+    An iCloud-optimised library keeps `originals/` empty and stores only downsized preview
+    derivatives under `resources/derivatives/` — so we can't just walk `originals/` for media
+    the way older/local libraries allow. Reading ZASSET directly is the only way to enumerate
+    every asset regardless of whether its original bytes are actually on this Mac.
+    The live database is locked (WAL) while Photos.app may have it open, so we always work
+    off a copy.
     """
     db_path = lib_root / "database" / "Photos.sqlite"
-    by_uuid: dict[str, bool] = {}
-    by_name: dict[str, bool] = {}
     if not db_path.exists():
-        return by_uuid, by_name
+        return []
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_db = Path(tmp) / "Photos.sqlite"
@@ -509,53 +514,119 @@ def _load_photos_trash_state(lib_root: Path) -> tuple[dict[str, bool], dict[str,
             conn = sqlite3.connect(f"file:{tmp_db}?mode=ro", uri=True)
             try:
                 cols = {row[1] for row in conn.execute("PRAGMA table_info(ZASSET)").fetchall()}
-                select_cols = [c for c in ("ZUUID", "ZFILENAME", "ZTRASHEDSTATE") if c in cols]
-                if "ZTRASHEDSTATE" not in select_cols:
-                    return by_uuid, by_name
+                select_cols = [c for c in _PHOTOS_ASSET_COLUMNS if c in cols]
+                if "ZUUID" not in select_cols or "ZFILENAME" not in select_cols:
+                    return []
                 cur = conn.execute(f"SELECT {', '.join(select_cols)} FROM ZASSET")
-                for row in cur.fetchall():
-                    values = dict(zip(select_cols, row))
-                    is_trashed = bool(values.get("ZTRASHEDSTATE"))
-                    zuuid = values.get("ZUUID")
-                    zfilename = values.get("ZFILENAME")
-                    if zuuid:
-                        by_uuid[str(zuuid).lower()] = is_trashed
-                    if zfilename:
-                        by_name[str(zfilename).lower()] = is_trashed
+                return [dict(zip(select_cols, row)) for row in cur.fetchall()]
             finally:
                 conn.close()
         except (OSError, sqlite3.Error):
-            return {}, {}
-    return by_uuid, by_name
+            return []
+
+
+def _find_photos_original(lib_root: Path, uuid: str, filename: str) -> Path | None:
+    folder = lib_root / "originals" / uuid[0].upper()
+    if not folder.is_dir():
+        return None
+    ext = Path(filename).suffix
+    candidate = folder / f"{uuid}{ext}"
+    if candidate.exists():
+        return candidate
+    matches = sorted(folder.glob(f"{uuid}.*"))
+    return matches[0] if matches else None
+
+
+def _find_photos_best_derivative(lib_root: Path, uuid: str) -> Path | None:
+    """Picks the largest (highest-quality) preview derivative for an asset.
+
+    Derivatives live under resources/derivatives/<first-uuid-char>/ (and an older
+    .../masters/<first-uuid-char>/ location) named like <UUID>_1_105_c.jpeg,
+    <UUID>_1_102_o.jpeg, <UUID>_4_5005_c.jpeg — the numeric codes vary by asset kind and
+    Photos version, so rather than hardcode them we just take the largest file that starts
+    with the asset's UUID, skipping the per-frame video transcode slices (`_cvt_`).
+    """
+    c = uuid[0].upper()
+    best: Path | None = None
+    best_size = -1
+    for sub in (f"resources/derivatives/{c}", f"resources/derivatives/masters/{c}"):
+        folder = lib_root / sub
+        if not folder.is_dir():
+            continue
+        try:
+            entries = os.scandir(folder)
+        except OSError:
+            continue
+        with entries:
+            for entry in entries:
+                if "_cvt_" in entry.name or not entry.name.startswith(uuid):
+                    continue
+                try:
+                    if not entry.is_file():
+                        continue
+                    size = entry.stat().st_size
+                except OSError:
+                    continue
+                if size > best_size:
+                    best, best_size = Path(entry.path), size
+    return best
 
 
 def _scan_photos_library(source: MediaSource, found: list[FoundMedia], stats: ScanStats, cancel, emit) -> None:
-    by_uuid, by_name = _load_photos_trash_state(source.path)
-    for sub in ("originals", "Masters"):
-        root = source.path / sub
-        if not root.is_dir():
+    for row in _photos_asset_rows(source.path):
+        if cancel is not None and cancel.is_set():
+            return
+        uuid = row.get("ZUUID")
+        filename = row.get("ZFILENAME")
+        if not uuid or not filename:
             continue
-        for path in _iter_files(root, cancel):
-            if cancel is not None and cancel.is_set():
-                return
-            ext = path.suffix.lstrip(".").lower()
-            if ext not in MEDIA_EXTENSIONS:
-                continue
-            try:
-                st = path.stat()
-            except OSError:
-                continue
-            stats.current = str(path)
-            stats.files_seen += 1
-            trashed = by_uuid.get(path.stem.lower())
-            if trashed is None:
-                trashed = by_name.get(path.name.lower(), False)
-            fm = _build_found_media(path, st.st_size, st.st_mtime, source.key, ext)
-            fm.in_recently_deleted = trashed
-            found.append(fm)
-            stats.media_found += 1
-            stats.bytes += st.st_size
+        stats.current = str(filename)
+        stats.files_seen += 1
+
+        media_path = _find_photos_original(source.path, uuid, filename)
+        preview_only = media_path is None
+        if media_path is None:
+            media_path = _find_photos_best_derivative(source.path, uuid)
+        if media_path is None:
             emit()
+            continue
+        try:
+            st = media_path.stat()
+        except OSError:
+            emit()
+            continue
+
+        ext = Path(filename).suffix.lstrip(".").lower()
+        category: Category = "video" if row.get("ZKIND") == 1 else "image"
+        zdate = row.get("ZDATECREATED")
+        taken = None
+        if zdate is not None:
+            try:
+                taken = datetime.fromtimestamp(float(zdate) + _CORE_DATA_EPOCH_OFFSET)
+            except (OSError, OverflowError, ValueError):
+                taken = None
+        if taken is None:
+            taken = _safe_mtime(st.st_mtime)
+
+        fm = FoundMedia(
+            path=media_path,
+            name=filename,
+            ext=ext,
+            size=st.st_size,
+            category=category,
+            source_key=source.key,
+            taken=taken,
+            modified=_safe_mtime(st.st_mtime) or datetime.fromtimestamp(0),
+            sha256=None,
+            duplicate_of=None,
+            in_recently_deleted=bool(row.get("ZTRASHEDSTATE")),
+            note="Original is in iCloud Photos — only a preview is on this Mac" if preview_only else None,
+            preview_only=preview_only,
+        )
+        found.append(fm)
+        stats.media_found += 1
+        stats.bytes += st.st_size
+        emit()
 
 
 def _scan_generic_dir(

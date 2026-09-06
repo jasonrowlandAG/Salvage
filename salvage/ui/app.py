@@ -230,7 +230,15 @@ class MainWindow(QMainWindow):
         assert export_dir is not None
         written = media_facade.export(items, export_dir)
         self.session.recovered_paths = written
-        self.done_page.set_result(written, export_dir)
+        preview_only_count = sum(1 for it in items if it.preview_only and it.duplicate_of is None)
+        note = None
+        if preview_only_count:
+            plural = "s" if preview_only_count != 1 else ""
+            note = (
+                f"{preview_only_count} file{plural} were iCloud-only in Photos — a local preview "
+                "was copied instead of the full-resolution original."
+            )
+        self.done_page.set_result(written, export_dir, note=note)
         self.stack.setCurrentWidget(self.done_page)
 
     def reset_and_go_to_source(self) -> None:
@@ -259,4 +267,6 @@ class MainWindow(QMainWindow):
         if media_worker is not None and media_worker.isRunning():
             media_worker.cancel_event.set()
             media_worker.wait(5000)
+        self.media_results_page.thumb_service.cancel()
+        self.media_results_page.thumb_service.wait(3000)
         super().closeEvent(event)

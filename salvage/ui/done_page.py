@@ -49,9 +49,12 @@ class DonePage(QWidget):
         button_row.addWidget(new_scan_btn)
         outer.addLayout(button_row)
 
-    def set_result(self, recovered_paths: list[Path], recover_dir: Path) -> None:
+    def set_result(self, recovered_paths: list[Path], recover_dir: Path, note: str | None = None) -> None:
         self._recover_dir = recover_dir
-        self.summary_label.setText(f"{len(recovered_paths)} files recovered to {recover_dir}")
+        text = f"{len(recovered_paths)} files recovered to {recover_dir}"
+        if note:
+            text += f"\n{note}"
+        self.summary_label.setText(text)
         self.cleanup_check.setChecked(True)
 
     def _open_folder(self) -> None:
