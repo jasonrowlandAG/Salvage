@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from salvage.engine.ios import IOSDevice
+from salvage.engine.local_media import FoundMedia, MediaSource
 from salvage.engine.models import Device, RecoveredFile, ScanMode, ScanResult
 from salvage.ui.ios_facade import IOSParsedData
 
@@ -28,6 +29,12 @@ class ScanSession:
     ios_backup_dir: Path | None = None
     ios_parsed: IOSParsedData | None = None
 
+    # --- "This Mac" media search flow -----------------------------------
+    media_sources: list[MediaSource] = field(default_factory=list)
+    media_min_size: int = 20_000
+    media_hash_dupes: bool = True
+    media_found: list[FoundMedia] = field(default_factory=list)
+
     @property
     def session_dir(self) -> Path | None:
         if self.destination is None or not self.timestamp:
@@ -44,6 +51,11 @@ class ScanSession:
         d = self.session_dir
         return None if d is None else d / "Recovered" / "iPhone"
 
+    @property
+    def media_export_dir(self) -> Path | None:
+        d = self.session_dir
+        return None if d is None else d / "Photos and videos"
+
     def reset(self) -> None:
         self.device = None
         self.mode = ScanMode.DEEP
@@ -58,3 +70,7 @@ class ScanSession:
         self.ios_categories = set()
         self.ios_backup_dir = None
         self.ios_parsed = None
+        self.media_sources = []
+        self.media_min_size = 20_000
+        self.media_hash_dupes = True
+        self.media_found = []

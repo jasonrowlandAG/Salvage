@@ -6,17 +6,21 @@ real PhotoRec binary. Matches PhotoRecEngine.scan's signature exactly.
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import threading
 import time
 import zipfile
 from collections.abc import Callable
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 from PIL import Image
 
 from salvage.engine.ios import BackupProgress, IOSBackupError, IOSDevice
 from salvage.engine.ios_fixtures import build_synthetic_backup
+from salvage.engine.local_media import FoundMedia, MediaSource, ScanStats, _build_found_media, _dedupe
 from salvage.engine.models import (
     Device,
     RecoveredFile,
@@ -305,3 +309,129 @@ class FakeIOSBackup:
                     )
                 )
         return build_synthetic_backup(backup_root, udid)
+
+
+# ---------------------------------------------------------------------------
+# Fake "media on this Mac" search
+# ---------------------------------------------------------------------------
+
+FAKE_MEDIA_SOURCE_KEYS = ["fake_photos", "fake_messages", "fake_ios_backup"]
+
+
+def fake_media_sources() -> list[MediaSource]:
+    """A fixed set of sources for UI testing, one deliberately inaccessible.
+
+    Paths don't need to exist for display/validation purposes; only FakeMediaFinder
+    writes real files (into its own temp workdir), matching the same pattern as
+    FakeIOSBackup building a genuine BackupReader-readable directory.
+    """
+    home = Path.home()
+    return [
+        MediaSource(key="fake_photos", label="Pictures", path=home / "Pictures", kind="folder", accessible=True),
+        MediaSource(
+            key="fake_photoslibrary",
+            label="Photos Library.photoslibrary",
+            path=home / "Pictures" / "Photos Library.photoslibrary",
+            kind="photos_library",
+            accessible=True,
+        ),
+        MediaSource(
+            key="fake_messages",
+            label="Messages Attachments",
+            path=home / "Library" / "Messages" / "Attachments",
+            kind="messages",
+            accessible=True,
+        ),
+        MediaSource(
+            key="fake_ios_backup",
+            label="Jay's iPhone (Fake) — 06/09/2026",
+            path=Path(tempfile.gettempdir()) / "salvage_fake_ios_backup",
+            kind="ios_backup",
+            accessible=True,
+        ),
+        MediaSource(
+            key="fake_icloud",
+            label="iCloud Drive",
+            path=home / "Library" / "Mobile Documents" / "com~apple~CloudDocs",
+            kind="cloud",
+            accessible=False,
+            note="Grant Salvage Full Disk Access in System Settings → Privacy & Security.",
+        ),
+    ]
+
+
+def _write_fake_media_jpeg(path: Path, taken: datetime, colour: tuple[int, int, int]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img = Image.new("RGB", (320, 240), colour)
+    exif = img.getexif()
+    exif[306] = taken.strftime("%Y:%m:%d %H:%M:%S")
+    img.save(path, "JPEG", exif=exif)
+
+
+class FakeMediaFinder:
+    """Simulates local_media.scan_sources for SALVAGE_FAKE=1.
+
+    Writes ~200 real sample JPEGs (EXIF dates spread across several years, a handful
+    byte-identical for dedup, a handful tagged as recovered-from-backup) to a temp workdir,
+    then builds FoundMedia entries with the exact same _build_found_media()/_dedupe() code
+    the real scanner uses — so the media results UI (filters, badges, thumbnails) is
+    exercised against genuine files rather than hand-rolled fixtures.
+    """
+
+    def scan(
+        self,
+        sources: list[MediaSource],
+        on_progress: Callable[[ScanStats], None] | None = None,
+        cancel: threading.Event | None = None,
+        min_size: int = 20_000,
+        hash_dupes: bool = True,
+    ) -> list[FoundMedia]:
+        workdir = Path(tempfile.gettempdir()) / "salvage_fake_media"
+        workdir.mkdir(parents=True, exist_ok=True)
+
+        n = 200
+        years = [2016, 2017, 2018, 2019, 2021, 2022, 2023, 2024, 2025]
+        stats = ScanStats(sources_total=len(sources) or 1)
+        found: list[FoundMedia] = []
+
+        for i in range(n):
+            if cancel is not None and cancel.is_set():
+                break
+            year = years[i % len(years)]
+            taken = datetime(year, (i % 12) + 1, (i % 27) + 1, 9 + (i % 12), 15)
+            is_dupe = i > 0 and i % 40 == 0  # byte-identical copy of the previous file
+            name = f"IMG_{i:04d}.jpg" if not is_dupe else f"IMG_{i - 1:04d}_copy.jpg"
+            path = workdir / name
+            if not path.exists():
+                if is_dupe:
+                    shutil.copyfile(workdir / f"IMG_{i - 1:04d}.jpg", path)
+                else:
+                    # Vary colour per-index (not just cycling the small _COLOURS palette) so
+                    # only the explicit is_dupe copies collide by content hash — a handful
+                    # of real duplicates, not an accidental majority from periodic repeats.
+                    colour = ((i * 7) % 256, (i * 53) % 256, (i * 97) % 256)
+                    _write_fake_media_jpeg(path, taken, colour)
+            source_key = FAKE_MEDIA_SOURCE_KEYS[i % len(FAKE_MEDIA_SOURCE_KEYS)]
+            st = path.stat()
+            fm = _build_found_media(path, st.st_size, st.st_mtime, source_key, "jpg")
+            if source_key == "fake_ios_backup" and i % 11 == 0:
+                fm.note = "Missing from this Mac — recovered from iPhone backup"
+                fm.recovered = True
+            if i % 23 == 0:
+                fm.in_recently_deleted = True
+            found.append(fm)
+
+            stats.files_seen += 1
+            stats.media_found += 1
+            stats.bytes += st.st_size
+            stats.current = name
+            if on_progress is not None and i % 10 == 0:
+                on_progress(replace(stats))
+
+        if hash_dupes and not (cancel is not None and cancel.is_set()):
+            _dedupe(found, cancel)
+
+        stats.sources_done = stats.sources_total
+        if on_progress is not None:
+            on_progress(replace(stats))
+        return found

@@ -10,11 +10,14 @@ from PySide6.QtWidgets import QMainWindow, QMessageBox, QProgressDialog, QStacke
 
 from salvage.engine.ios import IOSDevice
 from salvage.engine.models import Device, RecoveredFile, ScanMode, ScanResult
-from salvage.ui import ios_facade
+from salvage.ui import ios_facade, media_facade
 from salvage.ui.done_page import DonePage
 from salvage.ui.ios_backup_page import IOSBackupPage
 from salvage.ui.ios_options_page import IOSOptionsPage
 from salvage.ui.ios_results_page import IOSResultsPage
+from salvage.ui.media_options_page import MediaOptionsPage
+from salvage.ui.media_results_page import MediaResultsPage
+from salvage.ui.media_scan_page import MediaScanPage
 from salvage.ui.options_page import OptionsPage
 from salvage.ui.results_page import ResultsPage
 from salvage.ui.scan_page import ScanPage
@@ -47,6 +50,9 @@ class MainWindow(QMainWindow):
         self.ios_options_page = IOSOptionsPage(self)
         self.ios_backup_page = IOSBackupPage(self)
         self.ios_results_page = IOSResultsPage(self)
+        self.media_options_page = MediaOptionsPage(self)
+        self.media_scan_page = MediaScanPage(self)
+        self.media_results_page = MediaResultsPage(self)
         for page in (
             self.source_page,
             self.options_page,
@@ -56,6 +62,9 @@ class MainWindow(QMainWindow):
             self.ios_options_page,
             self.ios_backup_page,
             self.ios_results_page,
+            self.media_options_page,
+            self.media_scan_page,
+            self.media_results_page,
         ):
             self.stack.addWidget(page)
 
@@ -183,6 +192,32 @@ class MainWindow(QMainWindow):
         self.done_page.set_result(written, recover_dir)
         self.stack.setCurrentWidget(self.done_page)
 
+    def go_to_media_options(self) -> None:
+        self.media_options_page.refresh()
+        self.stack.setCurrentWidget(self.media_options_page)
+
+    def go_to_media_scan(self, sources, min_size: int, hash_dupes: bool, destination: Path) -> None:
+        self.session.media_sources = sources
+        self.session.media_min_size = min_size
+        self.session.media_hash_dupes = hash_dupes
+        self.session.destination = destination
+        self.session.timestamp = datetime.now().strftime("%Y-%m-%d %H%M%S")
+        self.stack.setCurrentWidget(self.media_scan_page)
+        self.media_scan_page.start_scan(sources, min_size, hash_dupes)
+
+    def go_to_media_results(self, found) -> None:
+        self.session.media_found = found
+        self.media_results_page.set_items(found, self.session.media_sources)
+        self.stack.setCurrentWidget(self.media_results_page)
+
+    def export_media_results(self, items) -> None:
+        export_dir = self.session.media_export_dir
+        assert export_dir is not None
+        written = media_facade.export(items, export_dir)
+        self.session.recovered_paths = written
+        self.done_page.set_result(written, export_dir)
+        self.stack.setCurrentWidget(self.done_page)
+
     def reset_and_go_to_source(self) -> None:
         self.session.reset()
         self.source_page.refresh()
@@ -205,4 +240,8 @@ class MainWindow(QMainWindow):
         ios_parse_worker = self._ios_parse_worker
         if ios_parse_worker is not None and ios_parse_worker.isRunning():
             ios_parse_worker.wait(5000)
+        media_worker = self.media_scan_page.worker
+        if media_worker is not None and media_worker.isRunning():
+            media_worker.cancel_event.set()
+            media_worker.wait(5000)
         super().closeEvent(event)

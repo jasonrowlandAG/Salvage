@@ -87,6 +87,7 @@ class FoundMedia:
     duplicate_of: Path | None
     in_recently_deleted: bool = False
     note: str | None = None
+    recovered: bool = False
 
 
 @dataclass
@@ -152,6 +153,22 @@ def _ios_backup_label(backup_dir: Path, udid: str) -> str:
     date_str = date.strftime("%d/%m/%Y") if isinstance(date, datetime) else (str(date) if date else "")
     label = f"{device} — {date_str}" if date_str else str(device)
     return label
+
+
+def source_from_backup_dir(path: Path) -> MediaSource:
+    """Builds a MediaSource(kind="ios_backup") from any backup folder.
+
+    Unlike default_sources(), which only looks under MobileSync/Backup, this accepts any
+    directory containing a Manifest.db — including a Salvage-made backup from the iPhone
+    recovery flow — so it can back the "Add a folder or iPhone backup…" picker.
+    """
+    path = Path(path)
+    if not (path / "Manifest.db").exists():
+        raise ValueError(f"No Manifest.db found in {path}; this doesn't look like an iPhone backup.")
+    accessible, note = _check_accessible(path)
+    udid = path.name
+    label = _ios_backup_label(path, udid)
+    return MediaSource(key=f"ios_backup_{udid}", label=label, path=path, kind="ios_backup", accessible=accessible, note=note)
 
 
 def default_sources() -> list[MediaSource]:
@@ -253,6 +270,13 @@ def _skip_dir(path: Path) -> bool:
     if name.lower() in _SKIP_DIR_NAMES:
         return True
     if name.endswith(".app"):
+        return True
+    # .photoslibrary packages are walked by the dedicated photos_library source
+    # (which also reads Photos.sqlite for Recently Deleted state); walking them
+    # again here as a plain folder would re-find the same originals with no
+    # trash-state, plus every internal derivative/preview/cache file Photos.app
+    # keeps alongside them.
+    if name.lower().endswith((".photoslibrary", ".photoslibrary/")):
         return True
     if name == "Developer" and path.parent.name == "Library":
         return True
@@ -531,15 +555,69 @@ def _scan_generic_dir(
         emit()
 
 
-def _scan_ios_backup(source: MediaSource, found: list[FoundMedia], stats: ScanStats, cancel, emit) -> None:
+def messages_missing_on_mac(chat_db: Path | None = None) -> dict[str, str | None]:
+    """Cross-references Messages attachments against files still present on disk.
+
+    Returns {basename: year_string_or_None} for every image/video attachment recorded in
+    chat.db whose file no longer exists at its recorded path. scan_sources uses this set to
+    flag matching files found inside an iPhone backup as `recovered` — i.e. the attachment
+    vanished from this Mac but still exists on the phone.
+    """
+    if chat_db is None:
+        chat_db = Path.home() / "Library" / "Messages" / "chat.db"
+    chat_db = Path(chat_db)
+    if not chat_db.exists():
+        return {}
+
+    home = Path.home()
+    missing: dict[str, str | None] = {}
+    try:
+        conn = sqlite3.connect(f"file:{chat_db}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return {}
+    try:
+        query = (
+            "SELECT a.filename, strftime('%Y', max(m.date)/1000000000+978307200,'unixepoch') "
+            "FROM attachment a "
+            "LEFT JOIN message_attachment_join j ON j.attachment_id = a.ROWID "
+            "LEFT JOIN message m ON m.ROWID = j.message_id "
+            "WHERE (a.mime_type LIKE 'image/%' OR a.mime_type LIKE 'video/%') "
+            "AND a.filename IS NOT NULL "
+            "GROUP BY a.ROWID"
+        )
+        try:
+            rows = conn.execute(query).fetchall()
+        except sqlite3.Error:
+            return {}
+    finally:
+        conn.close()
+
+    for filename, year in rows:
+        if not filename:
+            continue
+        path = Path(filename.replace("~", str(home), 1)) if filename.startswith("~") else Path(filename)
+        if not path.exists():
+            missing.setdefault(path.name, year)
+    return missing
+
+
+def _scan_ios_backup(
+    source: MediaSource,
+    found: list[FoundMedia],
+    stats: ScanStats,
+    cancel,
+    emit,
+    missing_basenames: dict[str, str | None] | None = None,
+) -> None:
+    missing_basenames = missing_basenames or {}
     try:
         reader = BackupReader(source.path)
     except (FileNotFoundError, sqlite3.Error):
         return
     try:
-        matches = reader.find(domain="MediaDomain", relative_path_like="Library/SMS/Attachments/%")
-        matches += reader.find(domain="CameraRollDomain", relative_path_like="Media/DCIM/%")
-        for bf in matches:
+        sms_matches = reader.find(domain="MediaDomain", relative_path_like="Library/SMS/Attachments/%")
+        camera_matches = reader.find(domain="CameraRollDomain", relative_path_like="Media/DCIM/%")
+        for bf, is_sms in [(m, True) for m in sms_matches] + [(m, False) for m in camera_matches]:
             if cancel is not None and cancel.is_set():
                 return
             display_name = Path(bf.relative_path).name
@@ -553,7 +631,11 @@ def _scan_ios_backup(source: MediaSource, found: list[FoundMedia], stats: ScanSt
             stats.current = display_name
             stats.files_seen += 1
             fm = _build_found_media(bf.path_on_disk, bf.size, mtime, source.key, ext, display_name=display_name)
-            fm.note = f"from iPhone backup {source.label}"
+            if is_sms and display_name in missing_basenames:
+                fm.note = "Missing from this Mac — recovered from iPhone backup"
+                fm.recovered = True
+            else:
+                fm.note = f"from iPhone backup {source.label}"
             found.append(fm)
             stats.media_found += 1
             stats.bytes += bf.size
@@ -624,6 +706,7 @@ def scan_sources(
             last_emit = now
 
     found: list[FoundMedia] = []
+    missing_basenames: dict[str, str | None] | None = None
     for source in sources:
         if cancel is not None and cancel.is_set():
             break
@@ -636,7 +719,9 @@ def scan_sources(
                 elif source.kind == "messages":
                     _scan_generic_dir(source, found, stats, cancel, emit, min_size=0)
                 elif source.kind == "ios_backup":
-                    _scan_ios_backup(source, found, stats, cancel, emit)
+                    if missing_basenames is None:
+                        missing_basenames = messages_missing_on_mac()
+                    _scan_ios_backup(source, found, stats, cancel, emit, missing_basenames)
                 else:
                     _scan_generic_dir(source, found, stats, cancel, emit, min_size=min_size)
             except (OSError, PermissionError, sqlite3.Error):

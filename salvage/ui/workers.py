@@ -91,6 +91,32 @@ class IOSBackupWorker(QThread):
         self.finished_backup.emit(backup_dir)
 
 
+class MediaScanWorker(QThread):
+    progress = Signal(object)   # local_media.ScanStats
+    finished_scan = Signal(object)  # list[FoundMedia]
+
+    def __init__(self, fake: bool, sources, min_size: int, hash_dupes: bool, parent=None) -> None:
+        super().__init__(parent)
+        self._fake = fake
+        self._sources = sources
+        self._min_size = min_size
+        self._hash_dupes = hash_dupes
+        self.cancel_event = threading.Event()
+
+    def run(self) -> None:
+        from salvage.ui import media_facade
+
+        found = media_facade.scan(
+            self._fake,
+            self._sources,
+            self._min_size,
+            self._hash_dupes,
+            on_progress=lambda s: self.progress.emit(s),
+            cancel=self.cancel_event,
+        )
+        self.finished_scan.emit(found)
+
+
 class IOSParseWorker(QThread):
     finished_parse = Signal(object)  # ios_facade.IOSParsedData
     failed = Signal(str)

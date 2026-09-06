@@ -84,6 +84,41 @@ class IOSDeviceRow(QFrame):
         super().mousePressEvent(event)
 
 
+class MediaSearchCard(QFrame):
+    clicked = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setProperty("role", "card")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
+
+        icon_label = QLabel()
+        style = QApplication.style()
+        icon_label.setPixmap(style.standardIcon(QStyle.StandardPixmap.SP_DirHomeIcon).pixmap(28, 28))
+        layout.addWidget(icon_label)
+
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(2)
+        name_label = QLabel("Photos & videos on this Mac")
+        name_label.setStyleSheet("font-weight: 600;")
+        text_layout.addWidget(name_label)
+        sub_label = QLabel(
+            "Search the Photos library, Messages, iCloud Drive, cloud folders and iPhone backups"
+        )
+        sub_label.setProperty("role", "subheading")
+        sub_label.setWordWrap(True)
+        text_layout.addWidget(sub_label)
+        layout.addLayout(text_layout, 1)
+
+    def mousePressEvent(self, event) -> None:
+        self.clicked.emit()
+        super().mousePressEvent(event)
+
+
 class DeviceRow(QFrame):
     clicked = Signal(object)  # Device
 
@@ -168,6 +203,14 @@ class SourcePage(QWidget):
         self.refresh_btn.clicked.connect(self.refresh)
         header_row.addWidget(self.refresh_btn)
         outer.addLayout(header_row)
+
+        mac_heading = QLabel("This Mac")
+        mac_heading.setStyleSheet("font-weight: 600;")
+        outer.addWidget(mac_heading)
+
+        self.media_search_card = MediaSearchCard()
+        self.media_search_card.clicked.connect(self.controller.go_to_media_options)
+        outer.addWidget(self.media_search_card)
 
         ios_heading = QLabel("iPhone / iPad")
         ios_heading.setStyleSheet("font-weight: 600;")

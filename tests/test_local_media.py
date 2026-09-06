@@ -135,6 +135,21 @@ def test_scan_sources_walks_nested_folders_and_skips_junk_dirs(tmp_path):
     assert results[0].category == "image"
 
 
+def test_scan_sources_skips_photoslibrary_bundles_in_generic_folders(tmp_path):
+    # A .photoslibrary package can sit inside a plain folder source (e.g. ~/Pictures).
+    # It must be left to the dedicated photos_library source, not re-walked as a
+    # generic folder (which would miss trash-state and pick up internal derivatives).
+    root = tmp_path / "root"
+    (root / "Vacation.photoslibrary" / "originals" / "A").mkdir(parents=True)
+    (root / "Vacation.photoslibrary" / "originals" / "A" / "photo.jpg").write_bytes(b"x" * 30_000)
+    (root / "plain.jpg").write_bytes(b"y" * 30_000)
+
+    source = MediaSource(key="t", label="Test", path=root, kind="folder", accessible=True)
+    results = scan_sources([source], min_size=20_000, hash_dupes=False)
+
+    assert {fm.name for fm in results} == {"plain.jpg"}
+
+
 def test_scan_sources_respects_min_size_for_generic_folders(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
