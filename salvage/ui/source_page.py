@@ -24,6 +24,20 @@ from salvage.engine.models import Device
 from salvage.ui import engine_facade, ios_facade
 from salvage.ui.format_utils import human_size
 
+_SYSTEM_DISK_WARNING_FILEVAULT_ON = (
+    "This is your Mac's startup disk. macOS doesn't allow raw scanning of it, and FileVault is "
+    "on so the data is encrypted — a scan will find nothing. To get files back from this Mac: "
+    "check the Trash, iCloud Drive → Recently Deleted, Time Machine, or APFS local snapshots. "
+    "Salvage can scan external drives, USB sticks, SD cards and disk images."
+)
+_SYSTEM_DISK_WARNING_FILEVAULT_OFF = (
+    "This is your Mac's startup disk. macOS doesn't allow raw scanning of it unless Full Disk "
+    "Access is granted to Salvage (System Settings → Privacy & Security → Full Disk Access → "
+    "add Salvage). To get files back from this Mac: check the Trash, iCloud Drive → Recently "
+    "Deleted, Time Machine, or APFS local snapshots. Salvage can scan external drives, USB "
+    "sticks, SD cards and disk images."
+)
+
 
 class IOSDeviceRow(QFrame):
     clicked = Signal(object)  # IOSDevice
@@ -203,6 +217,12 @@ class SourcePage(QWidget):
         note.setWordWrap(True)
         outer.addWidget(note)
 
+        self.system_disk_warning = QLabel("")
+        self.system_disk_warning.setProperty("role", "error")
+        self.system_disk_warning.setWordWrap(True)
+        self.system_disk_warning.hide()
+        outer.addWidget(self.system_disk_warning)
+
         bottom_row = QHBoxLayout()
         self.image_btn = QPushButton("Scan a disk image…")
         self.image_btn.clicked.connect(self._pick_image)
@@ -223,6 +243,7 @@ class SourcePage(QWidget):
         self._rows = []
         self._selected_device = None
         self.continue_btn.setEnabled(False)
+        self.system_disk_warning.hide()
 
         devices = engine_facade.list_devices(self.controller.fake)
         if self._image_device is not None:
@@ -250,7 +271,29 @@ class SourcePage(QWidget):
         self._selected_device = device
         for row in self._rows:
             row.set_selected(row.device.id == device.id)
-        self.continue_btn.setEnabled(True)
+        self._update_system_disk_warning(device)
+
+    def _is_system_target(self, device: Device) -> bool:
+        if device.is_system:
+            return True
+        return any(
+            row.device.id == device.parent_id and row.device.is_system for row in self._rows
+        )
+
+    def _update_system_disk_warning(self, device: Device) -> None:
+        if not self._is_system_target(device):
+            self.system_disk_warning.hide()
+            self.continue_btn.setEnabled(True)
+            return
+
+        filevault_on = engine_facade.filevault_enabled(self.controller.fake)
+        if filevault_on:
+            self.system_disk_warning.setText(_SYSTEM_DISK_WARNING_FILEVAULT_ON)
+            self.continue_btn.setEnabled(False)
+        else:
+            self.system_disk_warning.setText(_SYSTEM_DISK_WARNING_FILEVAULT_OFF)
+            self.continue_btn.setEnabled(True)
+        self.system_disk_warning.show()
 
     def _pick_image(self) -> None:
         path_str, _ = QFileDialog.getOpenFileName(self, "Choose a disk image")

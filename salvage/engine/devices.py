@@ -36,6 +36,25 @@ def device_from_image(path: Path) -> Device:
     )
 
 
+def filevault_enabled() -> bool | None:
+    """True/False if FileVault status could be determined on macOS, else None
+    (other OS, or `fdesetup` failed/unavailable)."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        out = subprocess.run(
+            ["fdesetup", "status"], capture_output=True, text=True, timeout=10, check=True
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    status = out.stdout.strip()
+    if status.startswith("FileVault is On"):
+        return True
+    if status.startswith("FileVault is Off"):
+        return False
+    return None
+
+
 def system_volume_mount() -> str:
     if sys.platform == "win32":
         return os.environ.get("SystemDrive", "C:") + "\\"

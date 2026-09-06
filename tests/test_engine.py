@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 
 from salvage.engine.models import ScanMode
-from salvage.engine.photorec import PhotoRecEngine
+from salvage.engine.photorec import (
+    PhotoRecEngine,
+    _access_denied_message,
+    _parse_blocked_device,
+)
 from salvage.engine.results import recover_files
 
 TEST_IMAGE = Path("/Users/jasonrowland/Salvage/.probe/test_partition.raw")
@@ -49,3 +53,41 @@ def test_recover_files_copies_and_organises(tmp_path):
     assert len(copied) == len(result.files)
     assert all(p.exists() for p in copied)
     assert (dest / "Image").is_dir()
+
+
+# ---------------------------------------------------------------------------
+# macOS "Operation not permitted" parsing (no PhotoRec binary needed)
+# ---------------------------------------------------------------------------
+
+# Verbatim (ANSI-stripped) text from a real failed run against the internal
+# APFS container disk3, captured in photorec.out - PhotoRec exited before
+# ever writing photorec.log, so this has to be parsed from the streamed output.
+_REAL_OPERATION_NOT_PERMITTED_OUTPUT = (
+    "PhotoRec 7.2, Data Recovery Utility, February 2024\r\n"
+    "Christophe GRENIER <grenier@cgsecurity.org>\r\n"
+    "https://www.cgsecurity.org\r\n"
+    "\r\n"
+    "Unable to open file or device /dev/rdisk3: Operation not permitted\r\n"
+)
+
+
+def test_parse_blocked_device_matches_operation_not_permitted():
+    device = _parse_blocked_device(_REAL_OPERATION_NOT_PERMITTED_OUTPUT)
+    assert device == "/dev/rdisk3"
+
+
+def test_parse_blocked_device_matches_permission_denied():
+    text = "Unable to open file or device /dev/rdisk5: Permission denied\r\n"
+    assert _parse_blocked_device(text) == "/dev/rdisk5"
+
+
+def test_parse_blocked_device_returns_none_for_unrelated_text():
+    assert _parse_blocked_device("PhotoRec exited normally.") is None
+
+
+def test_access_denied_message_mentions_device_full_disk_access_and_filevault():
+    message = _access_denied_message("/dev/rdisk3")
+    assert "/dev/rdisk3" in message
+    assert "Full Disk Access" in message
+    assert "FileVault" in message
+    assert "external drives" in message

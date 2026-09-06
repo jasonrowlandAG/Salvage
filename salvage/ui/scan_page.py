@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from salvage.engine.models import ScanProgress, ScanResult
+from salvage.engine.photorec import NOT_ROOT_MESSAGE
 from salvage.ui.format_utils import human_elapsed
 from salvage.ui.workers import ScanWorker
 
@@ -133,11 +134,13 @@ class ScanPage(QWidget):
             self.error_frame.show()
             return
         if not result.success:
-            self.error_label.setText(
-                (result.error or "The scan failed.")
-                + "\n\nIf this mentions permissions, try running Salvage with administrator "
-                'rights (sudo on macOS/Linux, or "Run as administrator" on Windows).'
-            )
+            text = result.error or "The scan failed."
+            if result.error == NOT_ROOT_MESSAGE:
+                text += (
+                    "\n\nIf this mentions permissions, try running Salvage with administrator "
+                    'rights (sudo on macOS/Linux, or "Run as administrator" on Windows).'
+                )
+            self.error_label.setText(text)
             self.error_frame.show()
             return
         self.controller.session.scan_result = result

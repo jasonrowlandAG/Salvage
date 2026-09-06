@@ -29,6 +29,36 @@ _SECTOR_RE = re.compile(
 _NOT_ROOT = b"User is not root!"
 _SUCCESS_MARKER = "PhotoRec exited normally."
 
+# macOS (and occasionally Linux) refuses raw reads of a device even as root -
+# most commonly the Mac's own startup disk without Full Disk Access granted,
+# or an encrypted volume. PhotoRec prints this and exits without ever writing
+# photorec.log, e.g. "Unable to open file or device /dev/rdisk3: Operation not
+# permitted".
+_OPEN_DENIED_RE = re.compile(
+    r"Unable to open file or device (\S+):\s*(?:Operation not permitted|Permission denied)"
+)
+
+NOT_ROOT_MESSAGE = (
+    "PhotoRec needs administrator/root privileges to read raw devices on this OS. "
+    "Re-run Salvage as root, or scan a disk image file instead."
+)
+
+
+def _parse_blocked_device(text: str) -> str | None:
+    """Return the device path PhotoRec reported it couldn't open due to an OS
+    permission refusal, or None if `text` doesn't show that failure mode."""
+    match = _OPEN_DENIED_RE.search(text)
+    return match.group(1) if match else None
+
+
+def _access_denied_message(device: str) -> str:
+    return (
+        f"macOS blocked raw access to {device}. Scanning the Mac's own startup disk needs Full "
+        "Disk Access (System Settings → Privacy & Security → Full Disk Access → add Salvage) and "
+        "is not possible at all when FileVault is on, because the disk is encrypted. Salvage "
+        "works on external drives, USB sticks, SD cards and disk images."
+    )
+
 _CHUNK_SIZE = 8192
 _TAIL_KEEP = 4096  # bytes of trailing stdout kept around for regex matching across chunk boundaries
 _PROGRESS_INTERVAL = 0.2  # ~5/sec
@@ -178,6 +208,7 @@ class PhotoRecEngine:
         last_emit = 0.0
         tail = b""
         saw_not_root = False
+        blocked_device: str | None = None
         cancelled = False
 
         while True:
@@ -193,6 +224,9 @@ class PhotoRecEngine:
                 tail = (tail + chunk)[-_TAIL_KEEP:]
                 if _NOT_ROOT in tail:
                     saw_not_root = True
+                found_device = _parse_blocked_device(tail.decode(errors="replace"))
+                if found_device:
+                    blocked_device = found_device
 
                 match = None
                 for match in _SECTOR_RE.finditer(tail):
@@ -236,11 +270,11 @@ class PhotoRecEngine:
         if cancelled:
             error = None
         elif not success:
+            log_blocked_device = blocked_device or _parse_blocked_device(log_text)
             if saw_not_root or _NOT_ROOT.decode() in log_text:
-                error = (
-                    "PhotoRec needs administrator/root privileges to read raw devices on this OS. "
-                    "Re-run Salvage as root, or scan a disk image file instead."
-                )
+                error = NOT_ROOT_MESSAGE
+            elif log_blocked_device:
+                error = _access_denied_message(log_blocked_device)
             else:
                 error = "PhotoRec did not finish successfully; see log for details."
 

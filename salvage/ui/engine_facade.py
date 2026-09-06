@@ -103,6 +103,17 @@ def list_devices(fake: bool) -> list[Device]:
     return _list_devices()
 
 
+def filevault_enabled(fake: bool) -> bool | None:
+    if fake:
+        return None
+    try:
+        from salvage.engine.devices import filevault_enabled as _filevault_enabled
+    except ImportError as exc:
+        print(f"WARNING: salvage.engine.devices not available yet ({exc}); assuming unknown.")
+        return None
+    return _filevault_enabled()
+
+
 def device_from_image(path: Path, fake: bool) -> Device:
     if fake:
         return _fallback_device_from_image(path)

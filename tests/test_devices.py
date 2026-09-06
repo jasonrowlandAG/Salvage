@@ -257,6 +257,46 @@ def test_system_volume_mount_windows(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# filevault_enabled
+# ---------------------------------------------------------------------------
+
+
+def test_filevault_enabled_true_on_macos(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    class _Result:
+        stdout = "FileVault is On.\n"
+
+    monkeypatch.setattr(devices.subprocess, "run", lambda *a, **k: _Result())
+    assert devices.filevault_enabled() is True
+
+
+def test_filevault_enabled_false_on_macos(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    class _Result:
+        stdout = "FileVault is Off.\n"
+
+    monkeypatch.setattr(devices.subprocess, "run", lambda *a, **k: _Result())
+    assert devices.filevault_enabled() is False
+
+
+def test_filevault_enabled_none_on_non_macos(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert devices.filevault_enabled() is None
+
+
+def test_filevault_enabled_none_when_fdesetup_fails(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    def _raise(*a, **k):
+        raise OSError("fdesetup not found")
+
+    monkeypatch.setattr(devices.subprocess, "run", _raise)
+    assert devices.filevault_enabled() is None
+
+
+# ---------------------------------------------------------------------------
 # is_path_on_device
 # ---------------------------------------------------------------------------
 
