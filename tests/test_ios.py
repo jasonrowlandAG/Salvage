@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+import hashlib
 import plistlib
 import sqlite3
+import struct
 from pathlib import Path
 
 import pytest
+from Crypto.Cipher import AES
 
 from salvage.engine import ios
-from salvage.engine.ios import BackupReader, _PROGRESS_RE, _manifest_file_size, _parse_size
+from salvage.engine.ios import (
+    BackupKeyBag,
+    BackupPasswordError,
+    BackupReader,
+    _aes_key_unwrap,
+    _PROGRESS_RE,
+    _manifest_file_size,
+    _parse_size,
+)
+from salvage.engine.ios_fixtures import build_synthetic_encrypted_backup
 
 # ---------------------------------------------------------------------------
 # Progress-line regex (lines captured from a real idevicebackup2 run)
@@ -173,6 +185,183 @@ def test_backup_reader_extract_known_returns_none_for_missing_key(tmp_path):
 def test_backup_reader_raises_without_manifest_db(tmp_path):
     with pytest.raises(FileNotFoundError):
         BackupReader(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Encrypted-backup decryption: BackupKeyBag / RFC 3394 key unwrap / AES-CBC
+# ---------------------------------------------------------------------------
+
+
+def test_aes_key_unwrap_matches_rfc3394_test_vector():
+    # From RFC 3394 §4.1 ("Wrap 128 bits of Key Data with a 128-bit KEK") — an
+    # independent check of _aes_key_unwrap against the published spec, not just
+    # self-consistency with our own wrap helper.
+    kek = bytes.fromhex("000102030405060708090A0B0C0D0E0F")
+    wrapped = bytes.fromhex("1FA68B0A8112B447AEF34BD8FB5A7B829D3E862371D2CFE5"[:48])
+    expected = bytes.fromhex("00112233445566778899AABBCCDDEEFF"[:32])
+    assert _aes_key_unwrap(kek, wrapped) == expected
+
+
+def test_aes_key_unwrap_raises_on_wrong_key():
+    kek = bytes.fromhex("000102030405060708090A0B0C0D0E0F")
+    wrapped = bytes.fromhex("1FA68B0A8112B447AEF34BD8FB5A7B829D3E862371D2CFE5"[:48])
+    wrong_kek = b"\x00" * 16
+    with pytest.raises(ValueError):
+        _aes_key_unwrap(wrong_kek, wrapped)
+
+
+def _tlv(tag: str, value: bytes) -> bytes:
+    return tag.encode("ascii") + struct.pack(">I", len(value)) + value
+
+
+def _build_minimal_keybag(password: str, class_num: int = 4) -> tuple[bytes, bytes]:
+    """A from-scratch, hand-rolled keybag (not sharing code with ios.py's decrypt
+    path, nor with ios_fixtures.py's fuller fixture) — wraps one class key with
+    the passcode key derived exactly as BackupKeyBag.derive_class_keys expects.
+    Returns (keybag_bytes, class_key).
+    """
+    dpsl = b"unit-test-dpsl-1"
+    salt = b"unit-test-salt-2"
+    dpic = 100
+    iterations = 100
+    intermediate = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), dpsl, dpic, dklen=32)
+    passcode_key = hashlib.pbkdf2_hmac("sha1", intermediate, salt, iterations, dklen=32)
+
+    class_key = b"\x11" * 32
+
+    # RFC 3394 wrap, written independently of ios._aes_key_unwrap (this is the
+    # "encrypt helper" side — wrap is unwrap run forward).
+    n = len(class_key) // 8
+    r = [class_key[8 * i : 8 * i + 8] for i in range(n)]
+    a = b"\xa6" * 8
+    cipher = AES.new(passcode_key, AES.MODE_ECB)
+    for j in range(6):
+        for i in range(1, n + 1):
+            block = cipher.encrypt(a + r[i - 1])
+            t = n * j + i
+            a = (int.from_bytes(block[:8], "big") ^ t).to_bytes(8, "big")
+            r[i - 1] = block[8:]
+    wpky = a + b"".join(r)
+
+    keybag = b"".join(
+        _tlv(tag, value)
+        for tag, value in [
+            ("TYPE", struct.pack(">I", 0)),
+            ("UUID", b"\x01" * 16),
+            ("SALT", salt),
+            ("ITER", struct.pack(">I", iterations)),
+            ("DPIC", struct.pack(">I", dpic)),
+            ("DPSL", dpsl),
+            ("UUID", b"\x02" * 16),
+            ("CLAS", struct.pack(">I", class_num)),
+            ("WRAP", struct.pack(">I", 2)),
+            ("WPKY", wpky),
+        ]
+    )
+    return keybag, class_key
+
+
+def test_backup_keybag_derives_correct_class_key_with_right_password():
+    keybag_bytes, class_key = _build_minimal_keybag("hunter2")
+    keybag = BackupKeyBag.parse(keybag_bytes)
+    class_keys = keybag.derive_class_keys("hunter2")
+    assert class_keys == {4: class_key}
+
+
+def test_backup_keybag_wrong_password_raises():
+    keybag_bytes, _class_key = _build_minimal_keybag("hunter2")
+    keybag = BackupKeyBag.parse(keybag_bytes)
+    with pytest.raises(BackupPasswordError):
+        keybag.derive_class_keys("wrong-password")
+
+
+# ---------------------------------------------------------------------------
+# Full encrypted-backup round trip (BackupReader against a synthetic backup
+# built the same way salvage.engine.fake's fake encrypted device is)
+# ---------------------------------------------------------------------------
+
+_ENC_PASSWORD = "test1234"
+
+
+def test_backup_reader_decrypts_encrypted_backup(tmp_path):
+    backup_dir = build_synthetic_encrypted_backup(tmp_path, "ENCUDID", _ENC_PASSWORD)
+    reader = BackupReader(backup_dir, password=_ENC_PASSWORD)
+    try:
+        assert reader.is_encrypted is True
+        assert reader.needs_password is False
+        assert reader.info()["is_encrypted"] is True
+
+        dest_dir = tmp_path / "extracted"
+        sms_path = reader.extract_known("sms", dest_dir)
+        assert sms_path is not None
+        assert sms_path.read_bytes().startswith(b"SQLite format 3\x00")
+
+        calls_path = reader.extract_known("call_history", dest_dir)
+        assert calls_path is not None
+        assert calls_path.read_bytes().startswith(b"SQLite format 3\x00")
+
+        safari_path = reader.extract_known("safari_history", dest_dir)
+        assert safari_path is not None
+        assert safari_path.read_bytes().startswith(b"SQLite format 3\x00")
+    finally:
+        reader.close()
+
+
+def test_backup_reader_extracted_call_history_and_safari_history_parse_correctly(tmp_path):
+    from salvage.engine.ios_parsers import parse_call_history, parse_safari_history
+
+    backup_dir = build_synthetic_encrypted_backup(tmp_path, "ENCUDID2", _ENC_PASSWORD)
+    reader = BackupReader(backup_dir, password=_ENC_PASSWORD)
+    try:
+        dest_dir = tmp_path / "extracted2"
+        calls = parse_call_history(reader.extract_known("call_history", dest_dir))
+        assert len(calls) == 3
+        assert calls[0].address == "+61400000005"
+        assert calls[0].outgoing is True
+
+        visits = parse_safari_history(reader.extract_known("safari_history", dest_dir))
+        assert len(visits) == 2
+        assert {v.url for v in visits} == {
+            "https://example.com/",
+            "https://www.assemblygrowth.com/",
+        }
+    finally:
+        reader.close()
+
+
+def test_backup_reader_wrong_password_raises_backup_password_error(tmp_path):
+    backup_dir = build_synthetic_encrypted_backup(tmp_path, "ENCUDID3", _ENC_PASSWORD)
+    with pytest.raises(BackupPasswordError):
+        BackupReader(backup_dir, password="not-the-password")
+
+
+def test_backup_reader_no_password_leaves_reader_locked(tmp_path):
+    backup_dir = build_synthetic_encrypted_backup(tmp_path, "ENCUDID4", _ENC_PASSWORD)
+    reader = BackupReader(backup_dir)
+    try:
+        assert reader.is_encrypted is True
+        assert reader.needs_password is True
+        with pytest.raises(BackupPasswordError):
+            reader.find()
+    finally:
+        reader.close()
+
+
+def test_backup_reader_caches_decrypted_manifest_db(tmp_path):
+    backup_dir = build_synthetic_encrypted_backup(tmp_path, "ENCUDID5", _ENC_PASSWORD)
+    reader = BackupReader(backup_dir, password=_ENC_PASSWORD)
+    reader.close()
+
+    cache_path = backup_dir.parent / "salvage_cache" / backup_dir.name / "Manifest.decrypted.db"
+    assert cache_path.exists()
+    assert cache_path.read_bytes().startswith(b"SQLite format 3\x00")
+
+    # Reopening reuses the cache rather than re-deriving from scratch; still readable.
+    reader2 = BackupReader(backup_dir, password=_ENC_PASSWORD)
+    try:
+        assert reader2.find(domain="HomeDomain", relative_path_like="Library/SMS/sms.db")
+    finally:
+        reader2.close()
 
 
 def test_manifest_file_size_parses_synthetic_blob():

@@ -69,6 +69,24 @@ class TrashedPhoto:
     kind: str  # "image" / "video"
 
 
+@dataclass
+class Call:
+    address: str
+    date: datetime | None
+    duration_s: int
+    outgoing: bool
+    answered: bool
+    service: str  # e.g. "com.apple.FaceTime.Audio", carrier name for cellular calls
+
+
+@dataclass
+class Visit:
+    url: str
+    title: str
+    date: datetime | None
+    visit_count: int
+
+
 def _apple_date(raw) -> datetime | None:
     if not raw:
         return None
@@ -556,6 +574,62 @@ def parse_trashed_photos(photos_db: Path, reader) -> list[TrashedPhoto]:
         )
     conn.close()
     return results
+
+
+# ---------------------------------------------------------------------------
+# Call history (encrypted backups only)
+# ---------------------------------------------------------------------------
+
+
+def parse_call_history(path: Path) -> list[Call]:
+    path = Path(path)
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    calls: list[Call] = []
+    query = (
+        "SELECT ZADDRESS, ZDATE, ZDURATION, ZORIGINATED, ZANSWERED, ZSERVICE_PROVIDER "
+        "FROM ZCALLRECORD"
+    )
+    for address, date, duration, originated, answered, service in conn.execute(query):
+        if isinstance(address, (bytes, bytearray)):
+            address = address.decode("utf-8", errors="replace")
+        calls.append(
+            Call(
+                address=address or "Unknown",
+                date=_apple_date(date),
+                duration_s=int(duration) if duration else 0,
+                outgoing=bool(originated),
+                answered=bool(answered),
+                service=service or "",
+            )
+        )
+    conn.close()
+    return calls
+
+
+# ---------------------------------------------------------------------------
+# Safari history (encrypted backups only)
+# ---------------------------------------------------------------------------
+
+
+def parse_safari_history(path: Path) -> list[Visit]:
+    path = Path(path)
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    visits: list[Visit] = []
+    query = (
+        "SELECT hi.url, hv.title, hv.visit_time, hi.visit_count "
+        "FROM history_visits hv JOIN history_items hi ON hi.id = hv.history_item"
+    )
+    for url, title, visit_time, visit_count in conn.execute(query):
+        visits.append(
+            Visit(
+                url=url or "",
+                title=title or "",
+                date=_apple_date(visit_time),
+                visit_count=int(visit_count) if visit_count else 0,
+            )
+        )
+    conn.close()
+    return visits
 
 
 # ---------------------------------------------------------------------------

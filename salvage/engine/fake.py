@@ -259,6 +259,10 @@ def fake_devices() -> list[Device]:
 
 
 FAKE_IOS_UDID = "00008101-FAKE0001DEV1234"
+FAKE_IOS_ENCRYPTED_UDID = "00008101-FAKE0002ENC5678"
+# Demo-only password for the fake encrypted device — never a real secret, just
+# something to type into the password field while trying out the encrypted flow.
+FAKE_IOS_ENCRYPTED_PASSWORD = "test1234"
 
 
 def fake_ios_devices() -> list[IOSDevice]:
@@ -270,7 +274,15 @@ def fake_ios_devices() -> list[IOSDevice]:
             ios_version="17.4",
             capacity_bytes=128_000_000_000,
             encrypted_backups=False,
-        )
+        ),
+        IOSDevice(
+            udid=FAKE_IOS_ENCRYPTED_UDID,
+            name="iPhone (encrypted, Fake)",
+            product_type="iPhone15,3",
+            ios_version="18.4",
+            capacity_bytes=256_000_000_000,
+            encrypted_backups=True,
+        ),
     ]
 
 
@@ -281,7 +293,8 @@ class FakeIOSBackup:
     backup_root/udid) so the UI layer can drive fake and real backups the
     same way, and the resulting directory is a genuine BackupReader target —
     the same extraction and parsing code runs against it as against a real
-    device backup.
+    device backup. The second fake device's backup is encrypted with
+    FAKE_IOS_ENCRYPTED_PASSWORD so the password-entry flow can be tried too.
     """
 
     def run(
@@ -308,6 +321,10 @@ class FakeIOSBackup:
                         elapsed_s=time.monotonic() - start,
                     )
                 )
+        if udid == FAKE_IOS_ENCRYPTED_UDID:
+            from salvage.engine.ios_fixtures import build_synthetic_encrypted_backup
+
+            return build_synthetic_encrypted_backup(backup_root, udid, FAKE_IOS_ENCRYPTED_PASSWORD)
         return build_synthetic_backup(backup_root, udid)
 
 

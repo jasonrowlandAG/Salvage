@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from salvage.engine.ios_parsers import Contact, Message, Note, TrashedPhoto
+from salvage.engine.ios_parsers import Call, Contact, Message, Note, TrashedPhoto, Visit
 from salvage.ui.ios_facade import IOSParsedData
 
 _MIN_DATE = datetime.min.replace(tzinfo=timezone.utc)
@@ -177,6 +177,101 @@ class NoteTableModel(QAbstractTableModel):
         self.endResetModel()
 
 
+class CallTableModel(QAbstractTableModel):
+    HEADERS = ["Number/Address", "Date", "Duration", "Direction", "Answered", "Service"]
+
+    def __init__(self, calls: list[Call], parent=None) -> None:
+        super().__init__(parent)
+        self._all = sorted(calls, key=lambda c: c.date or _MIN_DATE, reverse=True)
+        self._visible: list[int] = list(range(len(self._all)))
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return len(self._visible)
+
+    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return len(self.HEADERS)
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            return self.HEADERS[section]
+        return None
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
+            return None
+        c = self._all[self._visible[index.row()]]
+        col = index.column()
+        if col == 0:
+            return c.address
+        if col == 1:
+            return c.date.strftime("%Y-%m-%d %H:%M") if c.date else ""
+        if col == 2:
+            minutes, seconds = divmod(c.duration_s, 60)
+            return f"{minutes}:{seconds:02d}"
+        if col == 3:
+            return "Outgoing" if c.outgoing else "Incoming"
+        if col == 4:
+            return "Yes" if c.answered else "No"
+        if col == 5:
+            return c.service
+        return None
+
+    def set_filter(self, search: str, only_deleted: bool) -> None:
+        # only_deleted has no meaning for call history; kept for _CategoryView's uniform API.
+        self.beginResetModel()
+        needle = search.lower().strip()
+        self._visible = [
+            i for i, c in enumerate(self._all) if not needle or needle in c.address.lower()
+        ]
+        self.endResetModel()
+
+
+class SafariHistoryTableModel(QAbstractTableModel):
+    HEADERS = ["Title", "URL", "Visited", "Visit count"]
+
+    def __init__(self, visits: list[Visit], parent=None) -> None:
+        super().__init__(parent)
+        self._all = sorted(visits, key=lambda v: v.date or _MIN_DATE, reverse=True)
+        self._visible: list[int] = list(range(len(self._all)))
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return len(self._visible)
+
+    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return len(self.HEADERS)
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            return self.HEADERS[section]
+        return None
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
+            return None
+        v = self._all[self._visible[index.row()]]
+        col = index.column()
+        if col == 0:
+            return v.title
+        if col == 1:
+            return v.url
+        if col == 2:
+            return v.date.strftime("%Y-%m-%d %H:%M") if v.date else ""
+        if col == 3:
+            return v.visit_count
+        return None
+
+    def set_filter(self, search: str, only_deleted: bool) -> None:
+        # only_deleted has no meaning for Safari history; kept for _CategoryView's API.
+        self.beginResetModel()
+        needle = search.lower().strip()
+        self._visible = [
+            i
+            for i, v in enumerate(self._all)
+            if not needle or needle in v.title.lower() or needle in v.url.lower()
+        ]
+        self.endResetModel()
+
+
 class PhotoGridModel(QAbstractListModel):
     def __init__(self, photos: list[TrashedPhoto], parent=None) -> None:
         super().__init__(parent)
@@ -206,7 +301,7 @@ class PhotoGridModel(QAbstractListModel):
 class _CategoryView(QWidget):
     """A filter box + 'show only deleted' toggle over a QTableView."""
 
-    def __init__(self, model, deleted_label: str) -> None:
+    def __init__(self, model, deleted_label: str | None) -> None:
         super().__init__()
         self._model = model
         layout = QVBoxLayout(self)
@@ -217,8 +312,9 @@ class _CategoryView(QWidget):
         self.search_edit.setPlaceholderText("Filter…")
         self.search_edit.textChanged.connect(self._apply_filter)
         controls.addWidget(self.search_edit, 1)
-        self.deleted_check = QCheckBox(f"Show only {deleted_label}")
+        self.deleted_check = QCheckBox(f"Show only {deleted_label}" if deleted_label else "")
         self.deleted_check.stateChanged.connect(self._apply_filter)
+        self.deleted_check.setVisible(deleted_label is not None)
         controls.addWidget(self.deleted_check)
         layout.addLayout(controls)
 
@@ -310,6 +406,16 @@ class IOSResultsPage(QWidget):
                 f"Notes ({len(data.notes):,} · {deleted:,} recovered)",
                 _CategoryView(NoteTableModel(data.notes), "recovered"),
             )
+        if data.calls:
+            self._add_tab(
+                f"Calls ({len(data.calls):,})",
+                _CategoryView(CallTableModel(data.calls), None),
+            )
+        if data.safari_history:
+            self._add_tab(
+                f"Safari history ({len(data.safari_history):,})",
+                _CategoryView(SafariHistoryTableModel(data.safari_history), None),
+            )
         if data.trashed_photos:
             self._add_tab(
                 f"Recently Deleted photos ({len(data.trashed_photos):,})",
@@ -324,6 +430,8 @@ class IOSResultsPage(QWidget):
             + len(data.whatsapp)
             + len(data.contacts)
             + len(data.notes)
+            + len(data.calls)
+            + len(data.safari_history)
             + len(data.trashed_photos)
         )
         self.footer_label.setText(f"{total:,} items recovered")

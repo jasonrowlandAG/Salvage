@@ -137,10 +137,12 @@ class MainWindow(QMainWindow):
         existing_backup_dir: Path | None,
         categories: set[str],
         destination: Path,
+        password: str | None = None,
     ) -> None:
         self.session.ios_device = device
         self.session.ios_existing_backup_dir = existing_backup_dir
         self.session.ios_categories = categories
+        self.session.ios_password = password
         self.session.destination = destination
         self.session.timestamp = datetime.now().strftime("%Y-%m-%d %H%M%S")
         self.session.session_dir.mkdir(parents=True, exist_ok=True)
@@ -166,9 +168,12 @@ class MainWindow(QMainWindow):
         self._progress_dialog.setCancelButton(None)
         self._progress_dialog.show()
 
-        self._ios_parse_worker = IOSParseWorker(backup_dir, session.ios_categories, workdir)
+        self._ios_parse_worker = IOSParseWorker(
+            backup_dir, session.ios_categories, workdir, password=session.ios_password
+        )
         self._ios_parse_worker.finished_parse.connect(self._on_ios_parse_finished)
         self._ios_parse_worker.failed.connect(self._on_ios_parse_failed)
+        self._ios_parse_worker.password_error.connect(self._on_ios_parse_password_error)
         self._ios_parse_worker.start()
 
     def _on_ios_parse_finished(self, data) -> None:
@@ -183,6 +188,16 @@ class MainWindow(QMainWindow):
             self._progress_dialog.close()
         QMessageBox.critical(self, "Couldn't read backup", message)
         self.go_to_source()
+
+    def _on_ios_parse_password_error(self, message: str) -> None:
+        if self._progress_dialog is not None:
+            self._progress_dialog.close()
+        # Only a live-device backup reaches here with a bad password (an existing backup
+        # folder is checked on the options page before we ever start extracting) — send
+        # the user back there to retry rather than dead-ending on an error dialog.
+        self.ios_options_page.set_source(self.session.ios_device, self.session.ios_existing_backup_dir)
+        self.ios_options_page.show_password_error(message)
+        self.stack.setCurrentWidget(self.ios_options_page)
 
     def export_ios_results(self, data) -> None:
         recover_dir = self.session.ios_recover_dir

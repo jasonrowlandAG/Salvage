@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
+from salvage.engine.ios import BackupPasswordError
 from salvage.engine.models import RecoveredFile, ScanMode, ScanProgress, ScanResult
 from salvage.ui import engine_facade, ios_facade
 
@@ -120,16 +121,30 @@ class MediaScanWorker(QThread):
 class IOSParseWorker(QThread):
     finished_parse = Signal(object)  # ios_facade.IOSParsedData
     failed = Signal(str)
+    password_error = Signal(str)  # wrong/missing backup password — distinct from other failures
 
-    def __init__(self, backup_dir: Path, categories: set[str], workdir: Path, parent=None) -> None:
+    def __init__(
+        self,
+        backup_dir: Path,
+        categories: set[str],
+        workdir: Path,
+        password: str | None = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self._backup_dir = backup_dir
         self._categories = categories
         self._workdir = workdir
+        self._password = password
 
     def run(self) -> None:
         try:
-            data = ios_facade.extract_and_parse_ios(self._backup_dir, self._categories, self._workdir)
+            data = ios_facade.extract_and_parse_ios(
+                self._backup_dir, self._categories, self._workdir, password=self._password
+            )
+        except BackupPasswordError as exc:
+            self.password_error.emit(str(exc))
+            return
         except Exception as exc:
             self.failed.emit(str(exc))
             return

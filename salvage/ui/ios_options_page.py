@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from salvage.engine.ios import IOSDevice
+from salvage.engine.ios import BackupPasswordError, BackupReader, IOSDevice
+from salvage.ui import ios_facade
 from salvage.ui.format_utils import human_size
 
 CATEGORY_CHECKS: list[tuple[str, str]] = [
@@ -31,6 +32,12 @@ CATEGORY_CHECKS: list[tuple[str, str]] = [
     ),
 ]
 
+# Only ever populated in encrypted backups — Apple omits them otherwise.
+ENCRYPTED_ONLY_CHECKS: list[tuple[str, str]] = [
+    ("call_history", "Call history"),
+    ("safari_history", "Safari history"),
+]
+
 
 class IOSOptionsPage(QWidget):
     def __init__(self, controller) -> None:
@@ -39,6 +46,7 @@ class IOSOptionsPage(QWidget):
         self.device: IOSDevice | None = None
         self.existing_backup_dir: Path | None = None
         self._destination: Path | None = None
+        self._encrypted = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -54,15 +62,31 @@ class IOSOptionsPage(QWidget):
         self.device_label.setProperty("role", "subheading")
         outer.addWidget(self.device_label)
 
-        self.encrypted_warning = QLabel(
-            "This backup is encrypted. Salvage can't read encrypted iPhone backups yet — "
-            "turn off backup encryption on the device (Settings > General > Transfer or "
-            "Reset iPhone > Encrypted Backup) and back up again."
+        self.password_panel = QFrame()
+        self.password_panel.setProperty("role", "panel")
+        password_layout = QVBoxLayout(self.password_panel)
+        password_title = QLabel("Backup password")
+        password_title.setStyleSheet("font-weight: 600;")
+        password_layout.addWidget(password_title)
+        password_hint = QLabel(
+            "This backup is encrypted. Your backup password stays on this Mac and is only "
+            "used to decrypt the backup."
         )
-        self.encrypted_warning.setProperty("role", "error")
-        self.encrypted_warning.setWordWrap(True)
-        self.encrypted_warning.hide()
-        outer.addWidget(self.encrypted_warning)
+        password_hint.setProperty("role", "subheading")
+        password_hint.setWordWrap(True)
+        password_layout.addWidget(password_hint)
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_edit.setPlaceholderText("Backup password")
+        self.password_edit.textChanged.connect(self._on_password_changed)
+        password_layout.addWidget(self.password_edit)
+        self.password_error_label = QLabel("")
+        self.password_error_label.setProperty("role", "error")
+        self.password_error_label.setWordWrap(True)
+        self.password_error_label.hide()
+        password_layout.addWidget(self.password_error_label)
+        self.password_panel.hide()
+        outer.addWidget(self.password_panel)
 
         types_panel = QFrame()
         types_panel.setProperty("role", "panel")
@@ -78,14 +102,21 @@ class IOSOptionsPage(QWidget):
             cb.stateChanged.connect(self._update_start_enabled)
             self.category_checks[key] = cb
             types_layout.addWidget(cb)
+        for key, label in ENCRYPTED_ONLY_CHECKS:
+            cb = QCheckBox(label)
+            cb.setChecked(False)
+            cb.setEnabled(False)
+            cb.stateChanged.connect(self._update_start_enabled)
+            self.category_checks[key] = cb
+            types_layout.addWidget(cb)
 
-        call_history_note = QLabel(
-            "Call history is only included in encrypted backups — enable 'Encrypt local "
-            "backup' in Finder to recover it."
+        encrypted_only_note = QLabel(
+            "Call history and Safari history are only included in encrypted backups — enable "
+            "'Encrypt local backup' in Finder to recover them."
         )
-        call_history_note.setProperty("role", "subheading")
-        call_history_note.setWordWrap(True)
-        types_layout.addWidget(call_history_note)
+        encrypted_only_note.setProperty("role", "subheading")
+        encrypted_only_note.setWordWrap(True)
+        types_layout.addWidget(encrypted_only_note)
         outer.addWidget(types_panel)
 
         dest_panel = QFrame()
@@ -124,21 +155,46 @@ class IOSOptionsPage(QWidget):
         self.existing_backup_dir = existing_backup_dir
         self._destination = None
         self.dest_edit.clear()
+        self.password_edit.clear()
+        self._clear_password_error()
 
         if device is not None:
             parts = [device.product_type, f"iOS {device.ios_version}"]
             if device.capacity_bytes:
                 parts.append(human_size(device.capacity_bytes))
             self.device_label.setText(f"Source: {device.name} · {' · '.join(parts)}")
+            self._encrypted = bool(device.encrypted_backups)
         else:
             self.device_label.setText(f"Source: existing backup at {existing_backup_dir}")
+            self._encrypted = existing_backup_dir is not None and ios_facade.is_encrypted_backup_folder(
+                existing_backup_dir
+            )
 
-        encrypted = bool(device is not None and device.encrypted_backups)
-        self.encrypted_warning.setVisible(encrypted)
+        self.password_panel.setVisible(self._encrypted)
+        for key, _label in ENCRYPTED_ONLY_CHECKS:
+            cb = self.category_checks[key]
+            cb.setEnabled(self._encrypted)
+            cb.setChecked(self._encrypted)
 
         desktop = Path.home() / "Desktop"
         if desktop.exists():
             self._set_destination(desktop)
+        self._update_start_enabled()
+
+    def show_password_error(self, message: str) -> None:
+        """Called by the controller when a backup created after this page (a live-device
+        backup) turns out to need a different password — keeps the user on this flow
+        instead of a dead-end error dialog.
+        """
+        self.password_error_label.setText(message)
+        self.password_error_label.show()
+
+    def _clear_password_error(self) -> None:
+        self.password_error_label.hide()
+        self.password_error_label.setText("")
+
+    def _on_password_changed(self, _text: str) -> None:
+        self._clear_password_error()
         self._update_start_enabled()
 
     def _browse_destination(self) -> None:
@@ -157,16 +213,30 @@ class IOSOptionsPage(QWidget):
         return {key for key, cb in self.category_checks.items() if cb.isChecked()}
 
     def _update_start_enabled(self, *_args) -> None:
-        encrypted = bool(self.device is not None and self.device.encrypted_backups)
         dest_ok = self._destination is not None
         types_ok = bool(self._selected_categories())
-        self.start_btn.setEnabled(bool(dest_ok and types_ok and not encrypted))
+        password_ok = not self._encrypted or bool(self.password_edit.text())
+        self.start_btn.setEnabled(bool(dest_ok and types_ok and password_ok))
 
     def _start(self) -> None:
         assert self._destination is not None
+        password = self.password_edit.text() if self._encrypted else None
+        self._clear_password_error()
+
+        # An existing (already-backed-up) encrypted folder can be checked right now,
+        # before leaving this page — no need to wait for a fresh device backup.
+        if self.existing_backup_dir is not None and self._encrypted:
+            try:
+                reader = BackupReader(self.existing_backup_dir, password=password)
+                reader.close()
+            except BackupPasswordError as exc:
+                self.show_password_error(str(exc))
+                return
+
         self.controller.go_to_ios_start(
             device=self.device,
             existing_backup_dir=self.existing_backup_dir,
             categories=self._selected_categories(),
             destination=self._destination,
+            password=password,
         )

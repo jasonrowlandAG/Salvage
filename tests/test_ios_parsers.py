@@ -7,8 +7,10 @@ import pytest
 
 from salvage.engine.ios_fixtures import (
     ADDRESSBOOK_SCHEMA as _ADDRESSBOOK_SCHEMA,
+    CALL_HISTORY_SCHEMA as _CALL_HISTORY_SCHEMA,
     MESSAGE_SCHEMA as _MESSAGE_SCHEMA,
     NOTESTORE_SCHEMA as _NOTESTORE_SCHEMA,
+    SAFARI_HISTORY_SCHEMA as _SAFARI_HISTORY_SCHEMA,
     WHATSAPP_SCHEMA as _WHATSAPP_SCHEMA,
     fake_attributed_body as _fake_attributed_body,
     fake_note_blob as _fake_note_blob,
@@ -21,9 +23,11 @@ from salvage.engine.ios_parsers import (
     export_csv,
     export_messages_html,
     export_notes_txt,
+    parse_call_history,
     parse_contacts,
     parse_messages,
     parse_notes,
+    parse_safari_history,
     parse_whatsapp,
 )
 from salvage.engine.sqlite_recover import recover_records
@@ -380,3 +384,102 @@ def test_export_notes_txt_writes_one_file_per_note(tmp_path):
     contents = [f.read_text(encoding="utf-8") for f in files]
     assert any("Milk" in c for c in contents)
     assert any("Eggs" in c and "recovered" in c for c in contents)
+
+
+# ---------------------------------------------------------------------------
+# Call history (encrypted backups only)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_call_history(tmp_path):
+    db = _make_db(tmp_path, "CallHistory.storedata", _CALL_HISTORY_SCHEMA)
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO ZCALLRECORD (ZADDRESS, ZDATE, ZDURATION, ZORIGINATED, ZANSWERED, "
+        "ZSERVICE_PROVIDER) VALUES (?, ?, ?, ?, ?, ?)",
+        ("+61400000001", 700000000.0, 90.0, 1, 1, "com.apple.CoreTelephony"),
+    )
+    conn.execute(
+        "INSERT INTO ZCALLRECORD (ZADDRESS, ZDATE, ZDURATION, ZORIGINATED, ZANSWERED, "
+        "ZSERVICE_PROVIDER) VALUES (?, ?, ?, ?, ?, ?)",
+        ("+61400000002", 700003600.0, 0.0, 0, 0, "FaceTime"),
+    )
+    conn.commit()
+    conn.close()
+
+    calls = parse_call_history(db)
+    assert len(calls) == 2
+    assert calls[0].address == "+61400000001"
+    assert calls[0].duration_s == 90
+    assert calls[0].outgoing is True
+    assert calls[0].answered is True
+    assert calls[0].service == "com.apple.CoreTelephony"
+    assert calls[1].outgoing is False
+    assert calls[1].answered is False
+    assert calls[0].date is not None
+
+
+def test_parse_call_history_csv_export(tmp_path):
+    db = _make_db(tmp_path, "CallHistory.storedata", _CALL_HISTORY_SCHEMA)
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO ZCALLRECORD (ZADDRESS, ZDATE, ZDURATION, ZORIGINATED, ZANSWERED, "
+        "ZSERVICE_PROVIDER) VALUES (?, ?, ?, ?, ?, ?)",
+        ("+61400000001", 700000000.0, 90.0, 1, 1, "com.apple.CoreTelephony"),
+    )
+    conn.commit()
+    conn.close()
+
+    calls = parse_call_history(db)
+    dest = tmp_path / "calls.csv"
+    export_csv(calls, dest)
+    content = dest.read_text(encoding="utf-8")
+    assert "address" in content.splitlines()[0]
+    assert "+61400000001" in content
+
+
+# ---------------------------------------------------------------------------
+# Safari history (encrypted backups only)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_safari_history(tmp_path):
+    db = _make_db(tmp_path, "History.db", _SAFARI_HISTORY_SCHEMA)
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO history_items (id, url, visit_count) VALUES (1, ?, 5)", ("https://example.com/",))
+    conn.execute(
+        "INSERT INTO history_visits (history_item, visit_time, title) VALUES (1, ?, ?)",
+        (700000000.0, "Example Domain"),
+    )
+    conn.execute(
+        "INSERT INTO history_visits (history_item, visit_time, title) VALUES (1, ?, ?)",
+        (700003600.0, "Example Domain (again)"),
+    )
+    conn.commit()
+    conn.close()
+
+    visits = parse_safari_history(db)
+    assert len(visits) == 2
+    assert visits[0].url == "https://example.com/"
+    assert visits[0].visit_count == 5
+    assert {v.title for v in visits} == {"Example Domain", "Example Domain (again)"}
+    assert all(v.date is not None for v in visits)
+
+
+def test_parse_safari_history_csv_export(tmp_path):
+    db = _make_db(tmp_path, "History.db", _SAFARI_HISTORY_SCHEMA)
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO history_items (id, url, visit_count) VALUES (1, ?, 2)", ("https://example.com/",))
+    conn.execute(
+        "INSERT INTO history_visits (history_item, visit_time, title) VALUES (1, ?, ?)",
+        (700000000.0, "Example Domain"),
+    )
+    conn.commit()
+    conn.close()
+
+    visits = parse_safari_history(db)
+    dest = tmp_path / "safari_history.csv"
+    export_csv(visits, dest)
+    content = dest.read_text(encoding="utf-8")
+    assert "url" in content.splitlines()[0]
+    assert "https://example.com/" in content

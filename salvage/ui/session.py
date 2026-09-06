@@ -27,6 +27,7 @@ class ScanSession:
     ios_existing_backup_dir: Path | None = None
     ios_categories: set[str] = field(default_factory=set)
     ios_backup_dir: Path | None = None
+    ios_password: str | None = None
     ios_parsed: IOSParsedData | None = None
 
     # --- "This Mac" media search flow -----------------------------------
@@ -69,6 +70,7 @@ class ScanSession:
         self.ios_existing_backup_dir = None
         self.ios_categories = set()
         self.ios_backup_dir = None
+        self.ios_password = None
         self.ios_parsed = None
         self.media_sources = []
         self.media_min_size = 20_000

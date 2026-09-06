@@ -8,6 +8,7 @@ disk on export.
 
 from __future__ import annotations
 
+import plistlib
 import shutil
 import threading
 from collections.abc import Callable
@@ -16,17 +17,21 @@ from pathlib import Path
 
 from salvage.engine.ios import BackupProgress, BackupReader, IOSDevice
 from salvage.engine.ios_parsers import (
+    Call,
     Contact,
     Message,
     Note,
     TrashedPhoto,
+    Visit,
     export_contacts_vcf,
     export_csv,
     export_messages_html,
     export_notes_txt,
+    parse_call_history,
     parse_contacts,
     parse_messages,
     parse_notes,
+    parse_safari_history,
     parse_trashed_photos,
     parse_whatsapp,
 )
@@ -37,7 +42,15 @@ CATEGORY_LABELS = {
     "contacts": "Contacts",
     "notes": "Notes",
     "photos": "Recently Deleted photos",
+    "call_history": "Call history",
+    "safari_history": "Safari history",
 }
+
+# Domain/path for Safari's per-profile history on iOS 17+ — the classic
+# "HomeDomain","Library/Safari/History.db" location (BackupReader.KNOWN
+# "safari_history") stops existing once Safari moves to per-profile storage.
+_SAFARI_PROFILE_DOMAIN = "AppDomain-com.apple.mobilesafari"
+_SAFARI_PROFILE_PATTERN = "Library/Safari/Profiles/%/History.db"
 
 
 @dataclass
@@ -47,6 +60,8 @@ class IOSParsedData:
     contacts: list[Contact] = field(default_factory=list)
     notes: list[Note] = field(default_factory=list)
     trashed_photos: list[TrashedPhoto] = field(default_factory=list)
+    calls: list[Call] = field(default_factory=list)
+    safari_history: list[Visit] = field(default_factory=list)
 
 
 def list_ios_devices(fake: bool) -> list[IOSDevice]:
@@ -75,8 +90,43 @@ def is_valid_backup_folder(path: Path) -> bool:
     return (Path(path) / "Manifest.db").exists()
 
 
-def extract_and_parse_ios(backup_dir: Path, categories: set[str], workdir: Path) -> IOSParsedData:
-    reader = BackupReader(backup_dir)
+def is_encrypted_backup_folder(path: Path) -> bool:
+    plist_path = Path(path) / "Manifest.plist"
+    if not plist_path.exists():
+        return False
+    with open(plist_path, "rb") as f:
+        data = plistlib.load(f)
+    return bool(data.get("IsEncrypted", False))
+
+
+def _extract_safari_history(reader: BackupReader, workdir: Path) -> Path | None:
+    """Classic pre-iOS-17 path first, then the newest/largest per-profile History.db
+    (iOS 17+ splits Safari history per profile — usually one real profile plus
+    several near-empty ones for extensions/private browsing/CarPlay).
+    """
+    classic = reader.extract_known("safari_history", workdir)
+    if classic is not None:
+        return classic
+
+    profiles = [
+        bf
+        for bf in reader.find(domain=_SAFARI_PROFILE_DOMAIN, relative_path_like=_SAFARI_PROFILE_PATTERN)
+        if bf.relative_path.endswith("/History.db")
+    ]
+    if not profiles:
+        return None
+    largest = max(profiles, key=lambda bf: bf.size)
+    dest = Path(workdir) / "History.db"
+    return reader.extract(largest, dest)
+
+
+def extract_and_parse_ios(
+    backup_dir: Path,
+    categories: set[str],
+    workdir: Path,
+    password: str | None = None,
+) -> IOSParsedData:
+    reader = BackupReader(backup_dir, password=password)
     data = IOSParsedData()
     try:
         if "messages" in categories:
@@ -100,6 +150,14 @@ def extract_and_parse_ios(backup_dir: Path, categories: set[str], workdir: Path)
             photos_path = reader.extract_known("photos_db", workdir)
             if photos_path is not None:
                 data.trashed_photos = parse_trashed_photos(photos_path, reader)
+        if "call_history" in categories:
+            calls_path = reader.extract_known("call_history", workdir)
+            if calls_path is not None:
+                data.calls = parse_call_history(calls_path)
+        if "safari_history" in categories:
+            safari_path = _extract_safari_history(reader, workdir)
+            if safari_path is not None:
+                data.safari_history = parse_safari_history(safari_path)
     finally:
         reader.close()
     return data
@@ -120,6 +178,10 @@ def export_ios_results(data: IOSParsedData, dest_dir: Path) -> list[Path]:
         written.append(export_csv(data.contacts, dest_dir / "contacts.csv"))
     if data.notes:
         written.append(export_notes_txt(data.notes, dest_dir / "notes"))
+    if data.calls:
+        written.append(export_csv(data.calls, dest_dir / "call_history.csv"))
+    if data.safari_history:
+        written.append(export_csv(data.safari_history, dest_dir / "safari_history.csv"))
     if data.trashed_photos:
         photos_dir = dest_dir / "recently_deleted_photos"
         photos_dir.mkdir(parents=True, exist_ok=True)
