@@ -14,7 +14,8 @@ Free, open-source file recovery for macOS (Windows/Linux support is scaffolded b
 - iOS zeroes deleted database rows (`secure_delete`), so truly deleted messages/contacts/notes cannot be carved off a modern iPhone. What is recoverable: anything in Recently Deleted (Messages, Notes, Photos), and anything in older backups.
 - iCloud-optimised photo libraries keep only thumbnails on the phone; full-size Recently Deleted photos are restored from iCloud Photos, not from the device.
 - Call history is only present in **encrypted** backups. Encrypted backups aren't supported yet.
-- **The Mac's own startup disk can't be carved.** macOS blocks raw reads of it even for root, and on Apple Silicon the SSD is hardware-encrypted regardless of FileVault, so sector scanning returns nothing. Use the "Photos & videos on this Mac" finder instead — it needs Full Disk Access (System Settings → Privacy & Security) to read the Photos library and Messages.
+- **The Mac's own startup disk can't be carved (yet).** macOS refuses raw reads of the internal disk unless the reader is a privileged helper registered to an app with Full Disk Access (`SMAppService`); a root process spawned via the admin prompt is refused with "Operation not permitted" even when the app has the grant. That helper is not built. It would also gain little: SSDs TRIM deleted blocks within minutes, so carving an internal SSD mostly finds files that still exist. Use the "Photos & videos on this Mac" finder instead — it needs Full Disk Access (System Settings → Privacy & Security) to read the Photos library and Messages.
+- Builds are signed with a local "Salvage Dev" identity (`packaging/build_mac.sh`) so a Full Disk Access grant survives rebuilds; ad-hoc signatures change every build and silently invalidate it.
 - Never recover files onto the drive you're recovering from. Salvage refuses to.
 
 ## Run from source
