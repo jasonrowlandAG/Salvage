@@ -13,6 +13,10 @@ from salvage.ui.style import STYLESHEET
 
 
 def main() -> None:
+    if "--print-engine" in sys.argv[1:]:
+        _print_engine_info()
+        return
+
     fake = os.environ.get("SALVAGE_FAKE") == "1"
 
     app = QApplication(sys.argv)
@@ -32,6 +36,26 @@ def main() -> None:
     window = MainWindow(fake, engine)
     window.show()
     sys.exit(app.exec())
+
+
+def _print_engine_info() -> None:
+    """Diagnostic for packaging: report where the engine locates its binaries, with
+    no GUI. Used to verify a frozen build finds the bundled photorec/libimobiledevice
+    tools rather than falling through to Homebrew."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    print(f"frozen={getattr(sys, 'frozen', False)} MEIPASS={meipass}")
+    try:
+        from salvage.engine.photorec import PhotoRecEngine
+
+        print(f"photorec={PhotoRecEngine.locate_binary()}")
+    except ImportError as exc:
+        print(f"photorec=<unavailable: {exc}>")
+    try:
+        from salvage.engine.ios import _tool
+
+        print(f"idevice_id={_tool('idevice_id')}")
+    except ImportError as exc:
+        print(f"idevice_id=<unavailable: {exc}>")
 
 
 if __name__ == "__main__":

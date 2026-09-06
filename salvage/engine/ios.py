@@ -32,6 +32,10 @@ def _tool(name: str) -> str:
         candidate = Path(base) / name
         if candidate.exists():
             return str(candidate)
+    # Bundled path, same layout as PhotoRecEngine.locate_binary() (macOS only for now).
+    bundled = Path(__file__).resolve().parent.parent / "bin" / "macos" / name
+    if bundled.exists():
+        return str(bundled)
     return name  # subprocess will raise FileNotFoundError with a clear message
 
 
