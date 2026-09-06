@@ -44,6 +44,18 @@ NOT_ROOT_MESSAGE = (
 )
 
 
+def _photorec_toggles(extensions: list[str]) -> list[str]:
+    """Map file extensions onto PhotoRec's detector-family names, dropping any we
+    have no mapping for so the command stays syntactically valid."""
+    toggles: list[str] = []
+    for ext in extensions:
+        clean = ext.lower().lstrip(".")
+        toggle = _TOGGLE_BY_EXT.get(clean, clean)
+        if toggle not in toggles:
+            toggles.append(toggle)
+    return toggles
+
+
 def _parse_blocked_device(text: str) -> str | None:
     """Return the device path PhotoRec reported it couldn't open due to an OS
     permission refusal, or None if `text` doesn't show that failure mode."""
@@ -58,6 +70,24 @@ def _access_denied_message(device: str) -> str:
         "is not possible at all when FileVault is on, because the disk is encrypted. Salvage "
         "works on external drives, USB sticks, SD cards and disk images."
     )
+
+# PhotoRec's /cmd file toggles name detector families, not file extensions, and an
+# unknown name makes it exit with a syntax error and recover nothing. Anything absent
+# here is carried by a family below (verified against this PhotoRec build).
+_TOGGLE_BY_EXT = {
+    "jpeg": "jpg", "tiff": "tif", "jp2": "jpg",
+    "heic": "mov", "heif": "mov", "webp": "riff",
+    "cr2": "raw", "nef": "raw", "arw": "raw", "dng": "raw", "pef": "raw", "srw": "raw",
+    "docx": "zip", "xlsx": "zip", "pptx": "zip", "epub": "zip",
+    "odt": "zip", "ods": "zip", "odp": "zip", "pages": "zip", "numbers": "zip",
+    "xls": "doc", "ppt": "doc", "rtf": "doc",
+    "csv": "txt",
+    "mp4": "mov", "m4v": "mov", "3gp": "mov", "m4a": "mov", "aac": "mov",
+    "avi": "riff", "wav": "riff",
+    "wmv": "asf", "wma": "asf",
+    "mpeg": "mpg", "mts": "m2ts", "webm": "mkv", "aiff": "aif",
+    "dmg": "iso",
+}
 
 _CHUNK_SIZE = 8192
 _TAIL_KEEP = 4096  # bytes of trailing stdout kept around for regex matching across chunk boundaries
@@ -118,7 +148,10 @@ class PhotoRecEngine:
 
         out_base = workdir / _OUTPUT_BASE
         cmd = self._build_cmd(mode, extensions)
-        args = [str(self.binary), "/log", "/d", str(out_base), "/cmd", str(source), cmd]
+        # PhotoRec runs with cwd=workdir (that is where it writes photorec.log), so a
+        # relative source path would no longer resolve.
+        source_arg = str(source) if str(source).startswith("/dev/") else str(Path(source).resolve())
+        args = [str(self.binary), "/log", "/d", str(out_base), "/cmd", source_arg, cmd]
 
         needs_privilege = (
             platform.system() in ("Darwin", "Linux")
@@ -314,11 +347,14 @@ class PhotoRecEngine:
     @staticmethod
     def _build_cmd(mode: ScanMode, extensions: list[str] | None) -> str:
         parts = ["partition_none", "options", mode.value, "fileopt", "everything"]
-        if extensions:
+        toggles = _photorec_toggles(extensions) if extensions else None
+        if toggles:
             parts.append("disable")
-            for ext in extensions:
-                parts += [ext.lower().lstrip("."), "enable"]
+            for toggle in toggles:
+                parts += [toggle, "enable"]
         else:
+            # No recognised toggles (or no filter): carve everything and let the
+            # caller filter afterwards, rather than send PhotoRec an empty set.
             parts.append("enable")
         parts.append("search")
         return ",".join(parts)

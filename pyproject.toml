@@ -27,4 +27,5 @@ include = ["salvage*"]
 testpaths = ["tests"]
 markers = [
     "e2e: end-to-end tests that drive the real Qt UI offscreen (slower, still run by default).",
+    "slow: builds a real hdiutil disk image and runs the real PhotoRec binary; skipped automatically if either is unavailable.",
 ]

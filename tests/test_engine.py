@@ -91,3 +91,21 @@ def test_access_denied_message_mentions_device_full_disk_access_and_filevault():
     assert "Full Disk Access" in message
     assert "FileVault" in message
     assert "external drives" in message
+
+
+def test_photorec_toggles_map_extensions_to_detector_families():
+    from salvage.engine.photorec import _photorec_toggles
+
+    # Extensions PhotoRec has no toggle for must ride their family, de-duplicated.
+    assert _photorec_toggles(["jpg", "jpeg", "heic", "cr2", "dng"]) == ["jpg", "mov", "raw"]
+    assert _photorec_toggles(["docx", "xlsx", "pdf"]) == ["zip", "pdf"]
+
+
+def test_build_cmd_never_emits_unknown_toggles():
+    from salvage.engine.photorec import PhotoRecEngine, _TOGGLE_BY_EXT
+
+    cmd = PhotoRecEngine._build_cmd(ScanMode.DEEP, ["jpeg", "heic", "webp", "rtf", "csv"])
+    emitted = {p for p in cmd.split(",")} - {"partition_none", "options", "wholespace", "freespace",
+                                             "fileopt", "everything", "disable", "enable", "search"}
+    assert emitted == {"jpg", "mov", "riff", "doc", "txt"}
+    assert not (emitted & set(_TOGGLE_BY_EXT)), "raw extensions must be mapped away"
