@@ -78,7 +78,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name="Salvage.app",
-    icon='packaging/assets/Salvage.icns',
+    icon='assets/Salvage.icns',
     bundle_identifier="com.salvage.app",
     info_plist={
         'LSApplicationCategoryType': 'public.app-category.utilities',
