@@ -14,7 +14,7 @@ Free, open-source file recovery for macOS (Windows/Linux support is scaffolded b
 - iOS zeroes deleted database rows (`secure_delete`), so truly deleted messages/contacts/notes cannot be carved off a modern iPhone. What is recoverable: anything in Recently Deleted (Messages, Notes, Photos), and anything in older backups.
 - iCloud-optimised photo libraries keep only thumbnails on the phone; full-size Recently Deleted photos are restored from iCloud Photos, not from the device.
 - Call history is only present in **encrypted** backups. Encrypted backups aren't supported yet.
-- **The Mac's own startup disk can't be carved.** Tested exhaustively: a root helper registered with `SMAppService` (prototype in `helper/`) does inherit the app's Full Disk Access and can read unmounted disks raw, but the kernel refuses raw reads of any *mounted* volume ("device is not readable"), and the APFS container underneath is FileVault ciphertext. No tool gets past that on a running Apple Silicon Mac; SSD TRIM would zero deleted blocks anyway. Use the "Photos & videos on this Mac" finder instead. Use the "Photos & videos on this Mac" finder instead — it needs Full Disk Access (System Settings → Privacy & Security) to read the Photos library and Messages.
+- **The Mac's own startup disk can't be carved.** Tested exhaustively: a root helper registered with `SMAppService` (prototype in `helper/`) does inherit the app's Full Disk Access and can read unmounted disks raw, but the kernel refuses raw reads of any *mounted* volume ("device is not readable"), and the APFS container underneath is FileVault ciphertext. No tool gets past that on a running Apple Silicon Mac; SSD TRIM would zero deleted blocks anyway. Use the "Photos & videos on this Mac" finder instead — it needs Full Disk Access (System Settings → Privacy & Security) to read the Photos library and Messages.
 - Builds are signed with a local "Salvage Dev" identity (`packaging/build_mac.sh`) so a Full Disk Access grant survives rebuilds; ad-hoc signatures change every build and silently invalidate it.
 - Never recover files onto the drive you're recovering from. Salvage refuses to.
 
@@ -41,7 +41,7 @@ SALVAGE_FAKE=1 .venv/bin/python -m salvage
 packaging/build_mac.sh   # → dist/Salvage.app (PhotoRec and iPhone tools bundled)
 ```
 
-The bundle is ad-hoc signed, not notarised: first launch needs right-click → Open.
+The bundle is signed with a local self-signed identity (created on first build via `security import`; falls back to ad-hoc), not notarised: first launch needs right-click → Open.
 
 ## Tests
 
@@ -55,6 +55,8 @@ The bundle is ad-hoc signed, not notarised: first launch needs right-click → O
 |---|---|
 | `salvage/engine/photorec.py` | PhotoRec wrapper: pty-streamed progress, cancel, log-based success check |
 | `salvage/engine/privileged.py` | One-time admin prompt for raw device scans (launchd-backed on macOS) |
+| `salvage/engine/local_media.py` | Media finder for the Mac: Photos library, Messages, cloud folders, iOS backups |
+| `helper/` | SMAppService root-helper prototype (opt-in build; see `helper/DESIGN.md`) |
 | `salvage/engine/devices.py` | Disk/partition listing for macOS, Windows, Linux |
 | `salvage/engine/results.py` | Collect recovered files, copy to destination by category |
 | `salvage/engine/ios.py` | iPhone detection, backup, Manifest.db reader, DCIM access |
