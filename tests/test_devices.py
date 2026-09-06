@@ -20,18 +20,24 @@ def _load_plist(name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_macos_parses_real_diskutil_fixture():
+def test_macos_parses_real_diskutil_fixture(monkeypatch):
     top = _load_plist("diskutil_list.plist")
     entries = top["AllDisksAndPartitions"]
 
     info_by_id = {}
     for name in [
         "disk0",
+        "disk0s1",
         "disk0s2",
+        "disk0s3",
         "disk3",
         "disk3s1",
+        "disk3s2",
         "disk3s3",
         "disk3s3s1",
+        "disk3s4",
+        "disk3s5",
+        "disk3s6",
         "disk4",
         "disk4s1",
     ]:
@@ -42,6 +48,17 @@ def test_macos_parses_real_diskutil_fixture():
 
     # disk0s2 is the Apple_APFS physical-store placeholder and must be skipped
     assert "disk0s2" not in by_id
+
+    # EFI/Recovery-ish partitions under disk0 are noise a non-technical user
+    # can't recover anything from -> excluded even though their info was fetched
+    assert "disk0s1" not in by_id  # Apple_APFS_ISC
+    assert "disk0s3" not in by_id  # Apple_APFS_Recovery
+
+    # Internal OS plumbing APFS volumes -> excluded
+    assert "disk3s2" not in by_id  # Update
+    assert "disk3s4" not in by_id  # Preboot
+    assert "disk3s5" not in by_id  # Recovery
+    assert "disk3s6" not in by_id  # VM
 
     disk0 = by_id["disk0"]
     assert disk0.kind == "disk"
@@ -55,6 +72,10 @@ def test_macos_parses_real_diskutil_fixture():
     assert disk3.kind == "disk"
     assert disk3.is_removable is False
     assert disk3.is_system is True  # synthesized container holding the boot volume
+    # Same MediaName as disk0 -> must be labelled distinctly, not as a duplicate
+    assert disk3.name == "APPLE SSD AP0512Z — APFS container"
+    # Linked back to the physical disk that hosts its physical-store partition
+    assert disk3.parent_id == "disk0"
 
     root_vol = by_id["disk3s3s1"]
     assert root_vol.mount_point == "/"
@@ -76,6 +97,12 @@ def test_macos_parses_real_diskutil_fixture():
     assert disk4s1.path == "/dev/rdisk4s1"
     assert disk4s1.is_removable is True
     assert disk4s1.name == "AnyUnlock - iPhone Password Unlocker Installer"
+
+    # disk0 is the physical disk hosting the boot container's physical store;
+    # the root volume (/) lives on disk3s3s1, two hops down (disk0 -> disk3 -> disk3s3s1).
+    # A destination validation check against disk0 must still resolve through that chain.
+    monkeypatch.setattr(os.path, "ismount", lambda p: str(p) == "/")
+    assert devices.is_path_on_device(Path("/Users/whoever"), disk0, result) is True
 
 
 def test_macos_missing_info_is_skipped():

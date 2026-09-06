@@ -72,9 +72,21 @@ def _is_path_on_device_posix(
     if device.mount_point and mp == device.mount_point:
         return True
     if device.kind == "disk" and all_devices:
-        for other in all_devices:
-            if other.parent_id == device.id and other.mount_point and mp == other.mount_point:
-                return True
+        # Walk the full descendant chain, not just direct children: a synthesized
+        # APFS container (e.g. disk3) sits between the physical disk (disk0) and
+        # the mounted volume (e.g. disk3s1), so a plain parent_id == device.id
+        # check would miss it.
+        frontier = {device.id}
+        seen: set[str] = set()
+        while frontier:
+            seen |= frontier
+            next_frontier: set[str] = set()
+            for other in all_devices:
+                if other.parent_id in frontier and other.id not in seen:
+                    if other.mount_point and mp == other.mount_point:
+                        return True
+                    next_frontier.add(other.id)
+            frontier = next_frontier
     return False
 
 
@@ -116,6 +128,70 @@ def _is_path_on_device_windows(
 # ---------------------------------------------------------------------------
 # macOS: diskutil
 # ---------------------------------------------------------------------------
+
+# Partition Content values that are OS plumbing, not something a non-technical
+# user can recover anything useful from.
+_NOISE_PARTITION_CONTENT = {
+    "EFI",
+    "Apple_Boot",
+    "Apple_APFS_Recovery",
+    "Apple_APFS_ISC",
+    "Apple_KernelCoreDump",
+    "Microsoft Reserved",
+    "Windows Recovery Environment",
+    "BIOS Boot",
+    "Linux Swap",
+}
+
+# APFS volume names/roles that are internal OS bookkeeping volumes, not
+# something a user would ever pick as a recovery source or destination.
+_NOISE_APFS_VOLUME_NAMES = {
+    "Preboot",
+    "Recovery",
+    "VM",
+    "Update",
+    "Hardware",
+    "iSCPreboot",
+    "xART",
+}
+
+
+def _is_noise_partition(content: str | None) -> bool:
+    if not content:
+        return False
+    return content in _NOISE_PARTITION_CONTENT or content.endswith("_Recovery")
+
+
+def _is_noise_apfs_volume(vol: dict) -> bool:
+    name = (vol.get("VolumeName") or "").strip()
+    if name in _NOISE_APFS_VOLUME_NAMES:
+        return True
+    roles = vol.get("APFSVolumeRoles") or []
+    return any(role in _NOISE_APFS_VOLUME_NAMES for role in roles)
+
+
+def _is_apfs_container(entry: dict | None, info: dict) -> bool:
+    """True for a synthesized APFS container disk (e.g. disk3 sitting atop
+    disk0's physical-store partition) as opposed to the physical disk itself."""
+    if entry is not None and entry.get("Content") == "Apple_APFS_Container":
+        return True
+    return info.get("VirtualOrPhysical") == "Virtual" and info.get(
+        "APFSContainerReference"
+    ) == info.get("DeviceIdentifier")
+
+
+def _physical_host_disk(entry: dict, entries: list[dict]) -> str | None:
+    """For a synthesized APFS container entry, find the whole disk hosting its
+    physical-store partition (e.g. disk3 -> disk0s2 -> disk0)."""
+    for store in entry.get("APFSPhysicalStores", []) or []:
+        store_id = store.get("DeviceIdentifier")
+        if not store_id:
+            continue
+        for other_entry in entries:
+            for part in other_entry.get("Partitions", []) or []:
+                if part.get("DeviceIdentifier") == store_id:
+                    return other_entry["DeviceIdentifier"]
+    return None
 
 
 def _diskutil_list() -> dict | None:
@@ -161,8 +237,12 @@ def _list_devices_macos() -> list[Device]:
         for part in entry.get("Partitions", []) or []:
             if part.get("Content") == "Apple_APFS":
                 continue  # physical-store placeholder; real data lives in the synthesized container below
+            if _is_noise_partition(part.get("Content")):
+                continue  # EFI/Recovery/etc - not a recovery target, just clutter
             ids_needed.append(part["DeviceIdentifier"])
         for vol in entry.get("APFSVolumes", []) or []:
+            if _is_noise_apfs_volume(vol):
+                continue  # Preboot/VM/Update/etc - internal OS plumbing volume
             ids_needed.append(vol["DeviceIdentifier"])
 
     info_by_id: dict[str, dict] = {}
@@ -182,14 +262,23 @@ def _parse_macos_devices(entries: list[dict], info_by_id: dict[str, dict]) -> li
             continue
         whole_id = entry["DeviceIdentifier"]
         if whole_id in info_by_id:
-            raw.append((whole_id, "disk", None))
+            disk_parent_id = None
+            if _is_apfs_container(entry, info_by_id[whole_id]):
+                # Link the synthesized container back to the physical disk that
+                # hosts it, so path-to-device checks can walk disk0 -> disk3 -> volume.
+                disk_parent_id = _physical_host_disk(entry, entries)
+            raw.append((whole_id, "disk", disk_parent_id))
         for part in entry.get("Partitions", []) or []:
             if part.get("Content") == "Apple_APFS":
+                continue
+            if _is_noise_partition(part.get("Content")):
                 continue
             pid = part["DeviceIdentifier"]
             if pid in info_by_id:
                 raw.append((pid, "partition", whole_id))
         for vol in entry.get("APFSVolumes", []) or []:
+            if _is_noise_apfs_volume(vol):
+                continue
             vid = vol["DeviceIdentifier"]
             if vid in info_by_id:
                 raw.append((vid, "partition", whole_id))
@@ -222,21 +311,32 @@ def _parse_macos_devices(entries: list[dict], info_by_id: dict[str, dict]) -> li
 
     devices = []
     for device_id, kind, parent_id in raw:
+        info = info_by_id[device_id]
+        is_container = kind == "disk" and _is_apfs_container(entry_by_id.get(device_id), info)
         devices.append(
-            _macos_device(device_id, info_by_id[device_id], kind, parent_id, device_id in system_ids)
+            _macos_device(device_id, info, kind, parent_id, device_id in system_ids, is_container)
         )
     return devices
 
 
 def _macos_device(
-    device_id: str, info: dict, kind: str, parent_id: str | None, is_system: bool
+    device_id: str,
+    info: dict,
+    kind: str,
+    parent_id: str | None,
+    is_system: bool,
+    is_apfs_container: bool = False,
 ) -> Device:
     node = info.get("DeviceNode") or f"/dev/{device_id}"
     raw_path = "/dev/r" + node[len("/dev/") :] if node.startswith("/dev/") else node
 
     media_name = (info.get("MediaName") or "").strip()
     vol_name = (info.get("VolumeName") or "").strip()
-    if media_name and vol_name:
+    if is_apfs_container:
+        # Same MediaName as the physical disk it sits on - label it distinctly
+        # so the two don't look like duplicate entries in the drive list.
+        name = f"{media_name} — APFS container" if media_name else f"{device_id} — APFS container"
+    elif media_name and vol_name:
         name = f"{media_name} — {vol_name}"
     else:
         name = vol_name or media_name or device_id
