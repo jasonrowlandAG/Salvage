@@ -4,6 +4,7 @@ Free, open-source file recovery for macOS (Windows/Linux support is scaffolded b
 
 - **Drives, USB sticks, SD cards, disk images** — deleted-file recovery via [PhotoRec](https://www.cgsecurity.org/wiki/PhotoRec) (signature carving, 480+ formats). Quick scan (free space only) or Deep scan (every sector). Thumbnails, previews, filter by type, recover the ones you want.
 - **iPhone / iPad** — pulls a local backup over USB via [libimobiledevice](https://libimobiledevice.org), then reads Messages, WhatsApp, Contacts, Notes and Recently Deleted photos out of it, including items sitting in iOS's own Recently Deleted holding areas. Works on existing Finder/iTunes backups too.
+- **Photos & videos on this Mac** — for the Mac's own drive, where raw scanning is impossible (see below). Searches every place media hides — Photos library and its Recently Deleted, Messages attachments, iCloud Drive, cloud-sync folders, iPhone backups — de-duplicates by content, and flags Messages media that has vanished from the Mac but survives in an iPhone backup.
 - No paywall, no "pay to unlock the files we found".
 
 ## Honest limits
@@ -13,6 +14,7 @@ Free, open-source file recovery for macOS (Windows/Linux support is scaffolded b
 - iOS zeroes deleted database rows (`secure_delete`), so truly deleted messages/contacts/notes cannot be carved off a modern iPhone. What is recoverable: anything in Recently Deleted (Messages, Notes, Photos), and anything in older backups.
 - iCloud-optimised photo libraries keep only thumbnails on the phone; full-size Recently Deleted photos are restored from iCloud Photos, not from the device.
 - Call history is only present in **encrypted** backups. Encrypted backups aren't supported yet.
+- **The Mac's own startup disk can't be carved.** macOS blocks raw reads of it even for root, and on Apple Silicon the SSD is hardware-encrypted regardless of FileVault, so sector scanning returns nothing. Use the "Photos & videos on this Mac" finder instead — it needs Full Disk Access (System Settings → Privacy & Security) to read the Photos library and Messages.
 - Never recover files onto the drive you're recovering from. Salvage refuses to.
 
 ## Run from source
