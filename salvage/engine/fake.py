@@ -15,6 +15,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from salvage.engine.ios import BackupProgress, IOSBackupError, IOSDevice
+from salvage.engine.ios_fixtures import build_synthetic_backup
 from salvage.engine.models import (
     Device,
     RecoveredFile,
@@ -250,3 +252,56 @@ def fake_devices() -> list[Device]:
             parent_id="disk4",
         ),
     ]
+
+
+FAKE_IOS_UDID = "00008101-FAKE0001DEV1234"
+
+
+def fake_ios_devices() -> list[IOSDevice]:
+    return [
+        IOSDevice(
+            udid=FAKE_IOS_UDID,
+            name="Jay's iPhone (Fake)",
+            product_type="iPhone13,2",
+            ios_version="17.4",
+            capacity_bytes=128_000_000_000,
+            encrypted_backups=False,
+        )
+    ]
+
+
+class FakeIOSBackup:
+    """Simulates idevicebackup2 by fabricating a tiny synthetic backup on disk.
+
+    Matches ios.create_backup's signature and return contract (Path to
+    backup_root/udid) so the UI layer can drive fake and real backups the
+    same way, and the resulting directory is a genuine BackupReader target —
+    the same extraction and parsing code runs against it as against a real
+    device backup.
+    """
+
+    def run(
+        self,
+        udid: str,
+        backup_root: Path,
+        on_progress: Callable[[BackupProgress], None] | None = None,
+        cancel: threading.Event | None = None,
+    ) -> Path:
+        backup_root = Path(backup_root)
+        backup_root.mkdir(parents=True, exist_ok=True)
+        start = time.monotonic()
+        ticks = 8
+        for step in range(1, ticks + 1):
+            if cancel is not None and cancel.is_set():
+                raise IOSBackupError("Backup cancelled.")
+            time.sleep(0.12)
+            if on_progress is not None:
+                on_progress(
+                    BackupProgress(
+                        percent=(step / ticks) * 100,
+                        current_file="Receiving files",
+                        bytes_done=step * 4_000_000,
+                        elapsed_s=time.monotonic() - start,
+                    )
+                )
+        return build_synthetic_backup(backup_root, udid)

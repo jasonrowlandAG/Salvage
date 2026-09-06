@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QStyle,
@@ -18,9 +19,55 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from salvage.engine.ios import IOSDevice
 from salvage.engine.models import Device
-from salvage.ui import engine_facade
+from salvage.ui import engine_facade, ios_facade
 from salvage.ui.format_utils import human_size
+
+
+class IOSDeviceRow(QFrame):
+    clicked = Signal(object)  # IOSDevice
+
+    def __init__(self, device: IOSDevice, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.device = device
+        self.setProperty("role", "card")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
+
+        icon_label = QLabel()
+        style = QApplication.style()
+        icon_label.setPixmap(style.standardIcon(QStyle.StandardPixmap.SP_DriveNetIcon).pixmap(28, 28))
+        layout.addWidget(icon_label)
+
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(2)
+        name_line = QHBoxLayout()
+        name_label = QLabel(device.name)
+        name_label.setStyleSheet("font-weight: 600;")
+        name_line.addWidget(name_label)
+        if device.encrypted_backups:
+            badge = QLabel("Backups encrypted")
+            badge.setProperty("role", "badge")
+            name_line.addWidget(badge)
+        name_line.addStretch()
+        text_layout.addLayout(name_line)
+
+        parts = [device.product_type, f"iOS {device.ios_version}"]
+        if device.capacity_bytes:
+            parts.append(human_size(device.capacity_bytes))
+        sub_label = QLabel(" · ".join(parts))
+        sub_label.setProperty("role", "subheading")
+        text_layout.addWidget(sub_label)
+
+        layout.addLayout(text_layout, 1)
+
+    def mousePressEvent(self, event) -> None:
+        self.clicked.emit(self.device)
+        super().mousePressEvent(event)
 
 
 class DeviceRow(QFrame):
@@ -86,6 +133,7 @@ class SourcePage(QWidget):
         self._rows: list[DeviceRow] = []
         self._selected_device: Device | None = None
         self._image_device: Device | None = None
+        self._ios_rows: list[IOSDeviceRow] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -102,6 +150,31 @@ class SourcePage(QWidget):
         self.refresh_btn.clicked.connect(self.refresh)
         header_row.addWidget(self.refresh_btn)
         outer.addLayout(header_row)
+
+        ios_heading = QLabel("iPhone / iPad")
+        ios_heading.setStyleSheet("font-weight: 600;")
+        outer.addWidget(ios_heading)
+
+        self.ios_list_container = QWidget()
+        self.ios_list_layout = QVBoxLayout(self.ios_list_container)
+        self.ios_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.ios_list_layout.setSpacing(8)
+        outer.addWidget(self.ios_list_container)
+
+        self.ios_empty_label = QLabel("No iPhone or iPad detected. Connect one by USB and unlock it.")
+        self.ios_empty_label.setProperty("role", "subheading")
+        outer.addWidget(self.ios_empty_label)
+
+        ios_bottom_row = QHBoxLayout()
+        self.use_backup_btn = QPushButton("Use an existing backup folder…")
+        self.use_backup_btn.clicked.connect(self._pick_backup_folder)
+        ios_bottom_row.addWidget(self.use_backup_btn)
+        ios_bottom_row.addStretch()
+        outer.addLayout(ios_bottom_row)
+
+        drive_heading = QLabel("Drives and disk images")
+        drive_heading.setStyleSheet("font-weight: 600;")
+        outer.addWidget(drive_heading)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -139,6 +212,8 @@ class SourcePage(QWidget):
         outer.addLayout(bottom_row)
 
     def refresh(self) -> None:
+        self._refresh_ios()
+
         for row in self._rows:
             row.setParent(None)
         self._rows = []
@@ -185,3 +260,36 @@ class SourcePage(QWidget):
     def _continue(self) -> None:
         if self._selected_device is not None:
             self.controller.go_to_options(self._selected_device)
+
+    def _refresh_ios(self) -> None:
+        for row in self._ios_rows:
+            row.setParent(None)
+        self._ios_rows = []
+
+        devices = ios_facade.list_ios_devices(self.controller.fake)
+        for device in devices:
+            row = IOSDeviceRow(device)
+            row.clicked.connect(self._select_ios_device)
+            self.ios_list_layout.addWidget(row)
+            self._ios_rows.append(row)
+
+        self.ios_empty_label.setVisible(len(devices) == 0)
+
+    def _select_ios_device(self, device: IOSDevice) -> None:
+        self.controller.go_to_ios_options(device=device, existing_backup_dir=None)
+
+    def _pick_backup_folder(self) -> None:
+        default_dir = Path.home() / "Library" / "Application Support" / "MobileSync" / "Backup"
+        start_dir = str(default_dir) if default_dir.exists() else str(Path.home())
+        path_str = QFileDialog.getExistingDirectory(self, "Choose an iPhone backup folder", start_dir)
+        if not path_str:
+            return
+        path = Path(path_str)
+        if not ios_facade.is_valid_backup_folder(path):
+            QMessageBox.warning(
+                self,
+                "Not a backup folder",
+                f"{path} doesn't contain a Manifest.db file, so it doesn't look like an iPhone backup.",
+            )
+            return
+        self.controller.go_to_ios_options(device=None, existing_backup_dir=path)

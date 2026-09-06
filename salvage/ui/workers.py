@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 
 from salvage.engine.models import RecoveredFile, ScanMode, ScanProgress, ScanResult
-from salvage.ui import engine_facade
+from salvage.ui import engine_facade, ios_facade
 
 
 class ScanWorker(QThread):
@@ -62,3 +62,49 @@ class RecoverWorker(QThread):
             self.failed.emit(str(exc))
             return
         self.finished_recover.emit(written)
+
+
+class IOSBackupWorker(QThread):
+    progress = Signal(object)   # BackupProgress
+    finished_backup = Signal(object)  # Path
+    failed = Signal(str)
+
+    def __init__(self, fake: bool, udid: str, backup_root: Path, parent=None) -> None:
+        super().__init__(parent)
+        self._fake = fake
+        self._udid = udid
+        self._backup_root = backup_root
+        self.cancel_event = threading.Event()
+
+    def run(self) -> None:
+        try:
+            backup_dir = ios_facade.create_ios_backup(
+                self._fake,
+                self._udid,
+                self._backup_root,
+                on_progress=lambda p: self.progress.emit(p),
+                cancel=self.cancel_event,
+            )
+        except Exception as exc:
+            self.failed.emit(str(exc))
+            return
+        self.finished_backup.emit(backup_dir)
+
+
+class IOSParseWorker(QThread):
+    finished_parse = Signal(object)  # ios_facade.IOSParsedData
+    failed = Signal(str)
+
+    def __init__(self, backup_dir: Path, categories: set[str], workdir: Path, parent=None) -> None:
+        super().__init__(parent)
+        self._backup_dir = backup_dir
+        self._categories = categories
+        self._workdir = workdir
+
+    def run(self) -> None:
+        try:
+            data = ios_facade.extract_and_parse_ios(self._backup_dir, self._categories, self._workdir)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+            return
+        self.finished_parse.emit(data)

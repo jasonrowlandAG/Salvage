@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-import gzip
 import sqlite3
-import struct
 from pathlib import Path
 
 import pytest
 
+from salvage.engine.ios_fixtures import (
+    ADDRESSBOOK_SCHEMA as _ADDRESSBOOK_SCHEMA,
+    MESSAGE_SCHEMA as _MESSAGE_SCHEMA,
+    NOTESTORE_SCHEMA as _NOTESTORE_SCHEMA,
+    WHATSAPP_SCHEMA as _WHATSAPP_SCHEMA,
+    fake_attributed_body as _fake_attributed_body,
+    fake_note_blob as _fake_note_blob,
+)
 from salvage.engine.ios_parsers import (
     Contact,
     Message,
@@ -22,70 +28,10 @@ from salvage.engine.ios_parsers import (
 )
 from salvage.engine.sqlite_recover import recover_records
 
-# ---------------------------------------------------------------------------
-# Synthetic fixture schemas — trimmed to the columns the parsers use, but with
-# real column names/types/PRIMARY KEY layout so the on-disk cell format
-# matches genuine iOS databases.
-# ---------------------------------------------------------------------------
-
-_MESSAGE_SCHEMA = """
-CREATE TABLE message (
-    ROWID INTEGER PRIMARY KEY AUTOINCREMENT,
-    guid TEXT UNIQUE NOT NULL,
-    text TEXT,
-    attributedBody BLOB,
-    handle_id INTEGER DEFAULT 0,
-    is_from_me INTEGER DEFAULT 0,
-    date INTEGER,
-    service TEXT
-);
-CREATE TABLE handle (ROWID INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, service TEXT NOT NULL);
-CREATE TABLE chat (
-    ROWID INTEGER PRIMARY KEY AUTOINCREMENT,
-    guid TEXT UNIQUE NOT NULL,
-    chat_identifier TEXT,
-    display_name TEXT
-);
-CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
-CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER, message_date INTEGER DEFAULT 0);
-CREATE TABLE attachment (ROWID INTEGER PRIMARY KEY AUTOINCREMENT, guid TEXT UNIQUE NOT NULL, filename TEXT);
-CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
-"""
-
-_ADDRESSBOOK_SCHEMA = """
-CREATE TABLE ABPerson (
-    ROWID INTEGER PRIMARY KEY AUTOINCREMENT,
-    First TEXT, Last TEXT, Organization TEXT
-);
-CREATE TABLE ABMultiValue (
-    UID INTEGER PRIMARY KEY, record_id INTEGER, property INTEGER, value TEXT
-);
-"""
-
-_NOTESTORE_SCHEMA = """
-CREATE TABLE ZICNOTEDATA (
-    Z_PK INTEGER PRIMARY KEY, ZNOTE INTEGER, ZDATA BLOB
-);
-CREATE TABLE ZICCLOUDSYNCINGOBJECT (
-    Z_PK INTEGER PRIMARY KEY,
-    ZTITLE1 VARCHAR, ZTITLE2 VARCHAR, ZFOLDER INTEGER, ZFOLDERTYPE INTEGER,
-    ZMARKEDFORDELETION INTEGER, ZMODIFICATIONDATE TIMESTAMP
-);
-"""
-
-_WHATSAPP_SCHEMA = """
-CREATE TABLE ZWAMESSAGE (
-    Z_PK INTEGER PRIMARY KEY,
-    ZCHATSESSION INTEGER, ZISFROMME INTEGER, ZFROMJID VARCHAR, ZTOJID VARCHAR,
-    ZMESSAGEDATE TIMESTAMP, ZTEXT VARCHAR
-);
-CREATE TABLE ZWACHATSESSION (
-    Z_PK INTEGER PRIMARY KEY, ZCONTACTJID VARCHAR, ZPARTNERNAME VARCHAR
-);
-CREATE TABLE ZWAMEDIAITEM (
-    Z_PK INTEGER PRIMARY KEY, ZMESSAGE INTEGER, ZMEDIALOCALPATH VARCHAR
-);
-"""
+# Schemas are trimmed to the columns the parsers use, but with real column
+# names/types/PRIMARY KEY layout so the on-disk cell format matches genuine
+# iOS databases. Shared with salvage.engine.fake.FakeIOSBackup so the fake
+# iPhone flow exercises the same parser code paths as these tests.
 
 
 def _make_db(tmp_path: Path, name: str, schema: str) -> Path:
@@ -96,48 +42,6 @@ def _make_db(tmp_path: Path, name: str, schema: str) -> Path:
     conn.commit()
     conn.close()
     return db_path
-
-
-# ---------------------------------------------------------------------------
-# attributedBody synthetic streamtyped blob
-# ---------------------------------------------------------------------------
-
-
-def _fake_attributed_body(text: str) -> bytes:
-    payload = text.encode("utf-8")
-    assert len(payload) < 0x80
-    return b"\x04\x0bstreamtyped...NSString\x01\x95\x84\x01+" + bytes([len(payload)]) + payload
-
-
-# ---------------------------------------------------------------------------
-# Notes protobuf/gzip synthetic blob
-# ---------------------------------------------------------------------------
-
-
-def _pb_varint(n: int) -> bytes:
-    out = bytearray()
-    while True:
-        b = n & 0x7F
-        n >>= 7
-        if n:
-            out.append(b | 0x80)
-        else:
-            out.append(b)
-            return bytes(out)
-
-
-def _pb_field(field_no: int, wire_type: int, payload: bytes) -> bytes:
-    tag = _pb_varint((field_no << 3) | wire_type)
-    if wire_type == 2:
-        return tag + _pb_varint(len(payload)) + payload
-    raise ValueError("only length-delimited fields needed for this fixture")
-
-
-def _fake_note_blob(text: str) -> bytes:
-    note_msg = _pb_field(2, 2, text.encode("utf-8"))
-    document_msg = _pb_field(3, 2, note_msg)
-    root = _pb_field(2, 2, document_msg)
-    return gzip.compress(root)
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +143,38 @@ def test_recover_records_finds_deleted_message_reclaimed_into_gap(tmp_path):
 
     recovered = recover_records(db, "message", min_match=0.7)
     assert len(recovered) >= 1
+
+
+def test_parse_messages_marks_recently_deleted_from_recoverable_join(tmp_path):
+    db = _make_db(tmp_path, "sms.db", _MESSAGE_SCHEMA)
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO handle (ROWID, id, service) VALUES (1, '+15551234567', 'iMessage')")
+    conn.execute(
+        "INSERT INTO chat (ROWID, guid, chat_identifier, display_name) VALUES (1, 'chat-1', '+15551234567', NULL)"
+    )
+    conn.execute("INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (1, 1)")
+    conn.execute(
+        "INSERT INTO message (guid, text, handle_id, is_from_me, date, service) "
+        "VALUES ('m1', 'still here but recently deleted', 1, 0, 700000000000000000, 'iMessage')"
+    )
+    conn.execute(
+        "INSERT INTO message (guid, text, handle_id, is_from_me, date, service) "
+        "VALUES ('m2', 'never touched', 1, 0, 700000000000000000, 'iMessage')"
+    )
+    conn.execute("INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1)")
+    conn.execute("INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2)")
+    # message ROWID 1 is staged for deletion (iOS 16+ Recently Deleted).
+    conn.execute(
+        "INSERT INTO chat_recoverable_message_join (chat_id, message_id, delete_date) VALUES (1, 1, 800000000000000000)"
+    )
+    conn.commit()
+    conn.close()
+
+    msgs = parse_messages(db, include_deleted=False)
+    assert len(msgs) == 2
+    by_text = {m.text: m for m in msgs}
+    assert by_text["still here but recently deleted"].deleted is True
+    assert by_text["never touched"].deleted is False
 
 
 def test_parse_messages_merges_recovered_deleted_rows(tmp_path):

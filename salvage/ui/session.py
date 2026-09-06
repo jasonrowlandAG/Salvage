@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from salvage.engine.ios import IOSDevice
 from salvage.engine.models import Device, RecoveredFile, ScanMode, ScanResult
+from salvage.ui.ios_facade import IOSParsedData
 
 
 @dataclass
@@ -19,6 +21,13 @@ class ScanSession:
     scan_result: ScanResult | None = None
     recovered_paths: list[Path] = field(default_factory=list)
 
+    # --- iPhone flow ---------------------------------------------------
+    ios_device: IOSDevice | None = None
+    ios_existing_backup_dir: Path | None = None
+    ios_categories: set[str] = field(default_factory=set)
+    ios_backup_dir: Path | None = None
+    ios_parsed: IOSParsedData | None = None
+
     @property
     def session_dir(self) -> Path | None:
         if self.destination is None or not self.timestamp:
@@ -30,6 +39,11 @@ class ScanSession:
         d = self.session_dir
         return None if d is None else d / "Recovered"
 
+    @property
+    def ios_recover_dir(self) -> Path | None:
+        d = self.session_dir
+        return None if d is None else d / "Recovered" / "iPhone"
+
     def reset(self) -> None:
         self.device = None
         self.mode = ScanMode.DEEP
@@ -39,3 +53,8 @@ class ScanSession:
         self.workdir = None
         self.scan_result = None
         self.recovered_paths = []
+        self.ios_device = None
+        self.ios_existing_backup_dir = None
+        self.ios_categories = set()
+        self.ios_backup_dir = None
+        self.ios_parsed = None

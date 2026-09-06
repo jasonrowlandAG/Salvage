@@ -141,10 +141,22 @@ def _decode_attributed_body(blob: bytes) -> str:
     return text.replace("￼", "").strip()
 
 
+def _recoverable_message_ids(conn: sqlite3.Connection) -> set[int]:
+    # iOS 16+ "Recently Deleted" messages: still present in `message` but staged
+    # for permanent deletion after `delete_date` (Apple-epoch). Table may not
+    # exist on older backups.
+    try:
+        rows = conn.execute("SELECT message_id FROM chat_recoverable_message_join").fetchall()
+    except sqlite3.OperationalError:
+        return set()
+    return {row[0] for row in rows}
+
+
 def parse_messages(sms_db: Path, include_deleted: bool = True) -> list[Message]:
     sms_db = Path(sms_db)
     conn = sqlite3.connect(f"file:{sms_db}?mode=ro", uri=True)
 
+    recoverable_ids = _recoverable_message_ids(conn)
     handles = {rowid: hid for rowid, hid in conn.execute("SELECT ROWID, id FROM handle")}
 
     chat_info: dict[int, tuple[str | None, str | None]] = {}
@@ -198,7 +210,7 @@ def parse_messages(sms_db: Path, include_deleted: bool = True) -> list[Message]:
                 date=_apple_date(date),
                 service=service or "SMS",
                 attachments=attachments.get(rowid, []),
-                deleted=False,
+                deleted=rowid in recoverable_ids,
             )
         )
     conn.close()

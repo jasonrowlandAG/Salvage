@@ -219,6 +219,15 @@ def create_backup(
         tail = (tail + chunk)[-4096:]
 
         if _WAITING_PASSCODE in tail:
+            if not saw_passcode_wait and on_progress is not None:
+                on_progress(
+                    BackupProgress(
+                        percent=0.0,
+                        current_file="Waiting for passcode",
+                        bytes_done=None,
+                        elapsed_s=time.monotonic() - start,
+                    )
+                )
             saw_passcode_wait = True
 
         match = None
