@@ -69,6 +69,8 @@ class RecoveredFile:
     inode: str | None = None          # TSK metadata address, e.g. "12-128-3"
     source_engine: str = "photorec"   # "photorec" | "sleuthkit"
     integrity: Integrity = Integrity.UNKNOWN
+    integrity_reason: str | None = None   # short human explanation for the integrity verdict
+    also_exists: bool = False             # byte-identical copy still present on the mounted source volume
 
 
 @dataclass

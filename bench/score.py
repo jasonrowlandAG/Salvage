@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from bench.scenarios import ExpectedFile, GroundTruth
+from salvage.engine.models import Integrity
 
 DATE_TOLERANCE_S = 2.0  # FAT's own mtime resolution is 2s; TSK/carvers shouldn't do worse
 
@@ -49,9 +50,41 @@ class BenchResult:
     by_ext: dict[str, dict[str, Any]] = field(default_factory=dict)
     error: str | None = None
     notes: str = ""
+    # Integrity-verdict accuracy (salvage.engine.integrity.verify_many run over the
+    # engine's own returned files - see bench/run.py). "False-INTACT" is the
+    # dangerous error: a file the verifier told the user was fine, but whose bytes
+    # don't actually match the original. "False-CORRUPT" is the safe-but-annoying
+    # one: a genuinely intact recovery the verifier told the user to distrust.
+    integrity_intact_count: int = 0
+    integrity_false_intact_count: int = 0
+    integrity_false_corrupt_count: int = 0
+
+    @property
+    def integrity_precision(self) -> float | None:
+        """Of the files the verifier called INTACT, the fraction that are real
+        (byte-exact) recoveries."""
+        if self.integrity_intact_count == 0:
+            return None
+        return 1 - (self.integrity_false_intact_count / self.integrity_intact_count)
+
+    @property
+    def integrity_false_intact_rate(self) -> float | None:
+        if self.integrity_intact_count == 0:
+            return None
+        return self.integrity_false_intact_count / self.integrity_intact_count
+
+    @property
+    def integrity_false_corrupt_rate(self) -> float | None:
+        if self.recovered_true_positives == 0:
+            return None
+        return self.integrity_false_corrupt_count / self.recovered_true_positives
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d["integrity_precision"] = self.integrity_precision
+        d["integrity_false_intact_rate"] = self.integrity_false_intact_rate
+        d["integrity_false_corrupt_rate"] = self.integrity_false_corrupt_rate
+        return d
 
 
 def _sha256_file(path: Path) -> str | None:
@@ -87,15 +120,33 @@ def score(
     junk_bytes = 0
     returned_count = len(recovered_files)
 
+    # Integrity-verdict accuracy: computed alongside the content match above so we
+    # don't hash every file twice. "content_matches" is true whenever the file's
+    # bytes are byte-identical to *some* expected file, even if it's a duplicate
+    # return that recall/precision above will separately count as junk - a
+    # duplicate copy of a real file is still, itself, a real (intact) recovery.
+    integrity_intact_count = 0
+    integrity_false_intact_count = 0
+    integrity_false_corrupt_count = 0
+
     for rf in recovered_files:
         path = getattr(rf, "path", None)
         digest = hash_fn(Path(path)) if path is not None else None
         exp = expected.get(digest) if digest else None
-        if exp is not None and exp.sha256 not in matched_expected:
+        content_matches = exp is not None
+        if content_matches and exp.sha256 not in matched_expected:
             matched_expected[exp.sha256] = rf
         else:
             junk_count += 1
             junk_bytes += int(getattr(rf, "size", 0) or 0)
+
+        integrity = getattr(rf, "integrity", None)
+        if integrity == Integrity.INTACT:
+            integrity_intact_count += 1
+            if not content_matches:
+                integrity_false_intact_count += 1
+        elif integrity == Integrity.CORRUPT and content_matches:
+            integrity_false_corrupt_count += 1
 
     recovered_true_positives = len(matched_expected)
     recall = recovered_true_positives / expected_count if expected_count else 0.0
@@ -146,6 +197,9 @@ def score(
         elapsed_s=elapsed_s,
         by_ext={ext: {"expected": tb.expected, "recovered": tb.recovered, "recall": tb.recall} for ext, tb in sorted(by_ext.items())},
         notes=ground_truth.notes,
+        integrity_intact_count=integrity_intact_count,
+        integrity_false_intact_count=integrity_false_intact_count,
+        integrity_false_corrupt_count=integrity_false_corrupt_count,
     )
 
 

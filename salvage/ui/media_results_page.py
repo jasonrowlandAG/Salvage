@@ -9,8 +9,8 @@ thousands of items — see _request_visible_thumbnails.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt, QTimer
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -31,44 +31,16 @@ from salvage.engine import thumbcache
 from salvage.engine.local_media import FoundMedia
 from salvage.ui.format_utils import human_size
 from salvage.ui.preview_panel import PreviewPanel
-from salvage.ui.results_page import FileTileDelegate
+from salvage.ui.results_page import BadgeRole, FileTileDelegate
 from salvage.ui.thumb_service import BackgroundThumbnailService
 
 FoundMediaRole = Qt.ItemDataRole.UserRole + 1
-BadgeRole = Qt.ItemDataRole.UserRole + 2
-
-_BADGE_STYLE = {
-    "Recovered": ("#0a72e8", "Recovered"),
-    "Deleted": ("#c0392b", "Deleted"),
-    "Dup": ("#8a6d1d", "Dup"),
-    "iCloud": ("#6e6e73", "iCloud"),
-}
 
 _ALL = "__all__"
 
-
-class MediaTileDelegate(FileTileDelegate):
-    def paint(self, painter, option, index) -> None:
-        super().paint(painter, option, index)
-        badges = index.data(BadgeRole) or []
-        if not badges:
-            return
-        painter.save()
-        rect = option.rect
-        x = rect.right() - 6
-        y = rect.top() + 6
-        for badge in badges:
-            colour, text = _BADGE_STYLE.get(badge, ("#6e6e73", badge))
-            fm = painter.fontMetrics()
-            w = fm.horizontalAdvance(text) + 8
-            badge_rect = QRect(x - w, y, w, 14)
-            painter.setBrush(QColor(colour))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(badge_rect, 3, 3)
-            painter.setPen(QColor("#ffffff"))
-            painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, text)
-            x -= w + 4
-        painter.restore()
+# Badge painting (the _BADGE_STYLE colour map and the paint() override) lives on
+# FileTileDelegate in results_page.py and is shared as-is - this model just needs
+# to answer BadgeRole with its own "Recovered"/"Deleted"/"Dup"/"iCloud" strings.
 
 
 class MediaListModel(QAbstractListModel):
@@ -284,7 +256,7 @@ class MediaResultsPage(QWidget):
         self.list_view.setSpacing(8)
         self.list_view.setUniformItemSizes(True)
         self.list_view.setSelectionMode(QListView.SelectionMode.SingleSelection)
-        self.list_view.setItemDelegate(MediaTileDelegate(self))
+        self.list_view.setItemDelegate(FileTileDelegate(self))
         self.list_view.verticalScrollBar().valueChanged.connect(lambda _: self._thumb_timer.start())
         self.center_stack.addWidget(self.list_view)
         self.empty_label = QLabel("No files match your filters.")

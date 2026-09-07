@@ -65,6 +65,32 @@ class RecoverWorker(QThread):
         self.finished_recover.emit(written)
 
 
+class VerifyWorker(QThread):
+    """Runs integrity.verify_many (then results.mark_also_exists, if a device with
+    a mounted volume is available) off the UI thread after a drive scan completes."""
+
+    progress = Signal(int, int)
+    finished_verify = Signal(object)  # list[RecoveredFile]
+
+    def __init__(self, files: list[RecoveredFile], device, parent=None) -> None:
+        super().__init__(parent)
+        self._files = files
+        self._device = device
+
+    def run(self) -> None:
+        from salvage.engine import integrity
+        from salvage.engine import results as results_engine
+
+        verified = integrity.verify_many(
+            self._files, on_progress=lambda done, total: self.progress.emit(done, total)
+        )
+        try:
+            verified = results_engine.mark_also_exists(verified, self._device)
+        except Exception:
+            pass  # also_exists is best-effort - never let it fail the whole verification pass
+        self.finished_verify.emit(verified)
+
+
 class IOSBackupWorker(QThread):
     progress = Signal(object)   # BackupProgress
     finished_backup = Signal(object)  # Path

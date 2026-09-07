@@ -8,6 +8,7 @@ from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QRect, QSize
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -23,12 +24,28 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from salvage.engine.models import Category, RecoveredFile, ScanResult
+from salvage.engine.models import Category, Integrity, RecoveredFile, ScanResult
 from salvage.ui.format_utils import human_size
 from salvage.ui.preview_panel import PreviewPanel
 from salvage.ui.thumbnails import ThumbnailLoader
+from salvage.ui.workers import VerifyWorker
 
 PathRole = Qt.ItemDataRole.UserRole + 1
+# Shared with media_results_page.py's MediaListModel, which supplies the same role
+# for its own "Recovered"/"Deleted"/"Dup"/"iCloud" badges - one delegate, one style
+# map, so both result grids draw badges identically instead of duplicating the logic.
+BadgeRole = Qt.ItemDataRole.UserRole + 2
+
+_BADGE_STYLE = {
+    "Recovered": ("#0a72e8", "Recovered"),
+    "Deleted": ("#c0392b", "Deleted"),
+    "Dup": ("#8a6d1d", "Dup"),
+    "iCloud": ("#6e6e73", "iCloud"),
+    "Intact": ("#1d8a3d", "Intact"),
+    "Partial": ("#b8860b", "Partial"),
+    "Corrupt": ("#c0392b", "Corrupt"),
+    "On disk": ("#6e6e73", "On disk"),
+}
 
 CATEGORY_FILTER_LABELS: list[tuple[str | None, str]] = [
     (None, "All"),
@@ -80,6 +97,17 @@ class FileListModel(QAbstractListModel):
             return Qt.CheckState.Checked if self._visible[index.row()] in self._checked else Qt.CheckState.Unchecked
         if role == PathRole:
             return f
+        if role == BadgeRole:
+            badges = []
+            if f.also_exists:
+                badges.append("On disk")
+            if f.integrity == Integrity.INTACT:
+                badges.append("Intact")
+            elif f.integrity == Integrity.PARTIAL:
+                badges.append("Partial")
+            elif f.integrity == Integrity.CORRUPT:
+                badges.append("Corrupt")
+            return badges
         return None
 
     def setData(self, index: QModelIndex, value, role: int = Qt.ItemDataRole.EditRole) -> bool:
@@ -98,7 +126,15 @@ class FileListModel(QAbstractListModel):
             return Qt.ItemFlag.NoItemFlags
         return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable
 
-    def set_filter(self, category: str | None, search: str) -> None:
+    def set_filter(
+        self,
+        category: str | None,
+        search: str,
+        *,
+        only_intact: bool = False,
+        hide_corrupt: bool = False,
+        hide_on_disk: bool = False,
+    ) -> None:
         self.beginResetModel()
         needle = search.lower().strip()
         self._visible = [
@@ -106,6 +142,9 @@ class FileListModel(QAbstractListModel):
             for i, f in enumerate(self._all)
             if (category is None or f.category == category)
             and (not needle or needle in f.name.lower() or needle in f.ext.lower())
+            and (not only_intact or f.integrity == Integrity.INTACT)
+            and (not hide_corrupt or f.integrity != Integrity.CORRUPT)
+            and (not hide_on_disk or not f.also_exists)
         ]
         self.endResetModel()
 
@@ -139,6 +178,36 @@ class FileListModel(QAbstractListModel):
 
     def checked_files(self) -> list[RecoveredFile]:
         return [self._all[i] for i in sorted(self._checked)]
+
+    def all_files(self) -> list[RecoveredFile]:
+        return list(self._all)
+
+    def any_on_disk(self) -> bool:
+        return any(f.also_exists for f in self._all)
+
+    def update_files(self, updated: list[RecoveredFile]) -> None:
+        """Swaps in verified copies (same order/paths as before, only integrity/
+        also_exists differ) once background verification finishes."""
+        if len(updated) != len(self._all):
+            return
+        self._all = updated
+        if self._visible:
+            self.dataChanged.emit(
+                self.index(0), self.index(len(self._visible) - 1), [BadgeRole, Qt.ItemDataRole.DecorationRole]
+            )
+
+    def select_default_recoverable(self) -> None:
+        """Default recovery selection once verdicts are known: intact + partial,
+        excluding corrupt and files already present on the source volume."""
+        self._checked = {
+            i
+            for i, f in enumerate(self._all)
+            if f.integrity in (Integrity.INTACT, Integrity.PARTIAL) and not f.also_exists
+        }
+        if self._visible:
+            self.dataChanged.emit(
+                self.index(0), self.index(len(self._visible) - 1), [Qt.ItemDataRole.CheckStateRole]
+            )
 
 
 class FileTileDelegate(QStyledItemDelegate):
@@ -180,6 +249,23 @@ class FileTileDelegate(QStyledItemDelegate):
         opt.state = QStyle.StateFlag.State_Enabled
         opt.state |= QStyle.StateFlag.State_On if checked else QStyle.StateFlag.State_Off
         QApplication.style().drawControl(QStyle.ControlElement.CE_CheckBox, opt, painter)
+
+        badges = index.data(BadgeRole) or []
+        if badges:
+            x = rect.right() - 6
+            y = rect.top() + 6
+            for badge in badges:
+                colour, text = _BADGE_STYLE.get(badge, ("#6e6e73", badge))
+                fm = painter.fontMetrics()
+                w = fm.horizontalAdvance(text) + 8
+                badge_rect = QRect(x - w, y, w, 14)
+                painter.setBrush(QColor(colour))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawRoundedRect(badge_rect, 3, 3)
+                painter.setPen(QColor("#ffffff"))
+                painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, text)
+                x -= w + 4
+
         painter.restore()
 
     def editorEvent(self, event, model, option, index) -> bool:
@@ -203,6 +289,7 @@ class ResultsPage(QWidget):
         self._current_category: str | None = None
         self.thumb_loader = ThumbnailLoader(self)
         self.thumb_loader.ready.connect(self._on_thumb_ready)
+        self._verify_worker: VerifyWorker | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -226,6 +313,17 @@ class ResultsPage(QWidget):
         self.category_list.setFixedWidth(180)
         self.category_list.currentRowChanged.connect(self._on_category_changed)
         sidebar.addWidget(self.category_list, 1)
+
+        self.only_intact_check = QCheckBox("Only intact")
+        self.only_intact_check.stateChanged.connect(self._apply_filter)
+        sidebar.addWidget(self.only_intact_check)
+        self.hide_corrupt_check = QCheckBox("Hide corrupt")
+        self.hide_corrupt_check.stateChanged.connect(self._apply_filter)
+        sidebar.addWidget(self.hide_corrupt_check)
+        self.hide_on_disk_check = QCheckBox("Hide files already on disk")
+        self.hide_on_disk_check.stateChanged.connect(self._apply_filter)
+        sidebar.addWidget(self.hide_on_disk_check)
+
         sidebar_widget = QWidget()
         sidebar_widget.setLayout(sidebar)
         body.addWidget(sidebar_widget)
@@ -250,6 +348,9 @@ class ResultsPage(QWidget):
         footer_row = QHBoxLayout()
         self.footer_label = QLabel("0 selected · 0 B")
         footer_row.addWidget(self.footer_label)
+        self.verify_progress_label = QLabel("")
+        self.verify_progress_label.setProperty("role", "subheading")
+        footer_row.addWidget(self.verify_progress_label)
         footer_row.addStretch()
         select_all_btn = QPushButton("Select all (filtered)")
         select_all_btn.clicked.connect(self._select_all_filtered)
@@ -291,6 +392,10 @@ class ResultsPage(QWidget):
         self.search_edit.blockSignals(True)
         self.search_edit.clear()
         self.search_edit.blockSignals(False)
+        for check in (self.only_intact_check, self.hide_corrupt_check, self.hide_on_disk_check):
+            check.blockSignals(True)
+            check.setChecked(False)
+            check.blockSignals(False)
         self._current_category = None
         self.category_list.setCurrentRow(0)
         self._apply_filter()
@@ -299,6 +404,39 @@ class ResultsPage(QWidget):
 
         for f in self.model.image_files():
             self.thumb_loader.request(f.path)
+
+        self._start_verification()
+
+    def _start_verification(self) -> None:
+        if self.model is None:
+            return
+        files = self.model.all_files()
+        if not files:
+            return
+        device = getattr(self.controller.session, "device", None)
+        self.verify_progress_label.setText(f"Checking recovered files… 0 / {len(files):,}")
+        self._verify_worker = VerifyWorker(files, device, self)
+        self._verify_worker.progress.connect(self._on_verify_progress)
+        self._verify_worker.finished_verify.connect(self._on_verify_finished)
+        self._verify_worker.start()
+
+    def _on_verify_progress(self, done: int, total: int) -> None:
+        if self.sender() is not self._verify_worker:
+            return  # a stale worker from a previous scan - ignore
+        self.verify_progress_label.setText(f"Checking recovered files… {done:,} / {total:,}")
+
+    def _on_verify_finished(self, verified_files: list[RecoveredFile]) -> None:
+        if self.sender() is not self._verify_worker or self.model is None:
+            return  # a stale worker from a previous scan - ignore
+        self.verify_progress_label.setText("")
+        self.model.update_files(verified_files)
+        self.hide_on_disk_check.blockSignals(True)
+        self.hide_on_disk_check.setChecked(self.model.any_on_disk())
+        self.hide_on_disk_check.blockSignals(False)
+        self.model.select_default_recoverable()
+        self._apply_filter()
+        self._update_footer()
+        self._verify_worker = None
 
     def _rebuild_category_list(self) -> None:
         assert self.model is not None
@@ -322,7 +460,13 @@ class ResultsPage(QWidget):
     def _apply_filter(self) -> None:
         if self.model is None:
             return
-        self.model.set_filter(self._current_category, self.search_edit.text())
+        self.model.set_filter(
+            self._current_category,
+            self.search_edit.text(),
+            only_intact=self.only_intact_check.isChecked(),
+            hide_corrupt=self.hide_corrupt_check.isChecked(),
+            hide_on_disk=self.hide_on_disk_check.isChecked(),
+        )
         empty = self.model.rowCount() == 0
         self.center_stack.setCurrentWidget(self.empty_label if empty else self.list_view)
 
@@ -338,6 +482,13 @@ class ResultsPage(QWidget):
             self.preview_panel.show_item(None, None)
             return
         meta_lines = [f"Offset: {f.offset:,}" if f.offset is not None else "Offset: unknown"]
+        if f.integrity != Integrity.UNKNOWN:
+            line = f"Integrity: {f.integrity.value.capitalize()}"
+            if f.integrity_reason:
+                line += f" — {f.integrity_reason}"
+            meta_lines.append(line)
+        if f.also_exists:
+            meta_lines.append("Already exists on the source volume")
         self.preview_panel.show_item(
             f.path, f.category, name=f.name, size_text=human_size(f.size), meta_lines=meta_lines
         )

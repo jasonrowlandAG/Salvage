@@ -25,6 +25,7 @@ from bench.corpus import DEFAULT_SEED, build_corpus
 from bench.scenarios import SCENARIOS, run_scenario
 from bench.score import BenchResult, error_result, results_to_json, score
 
+from salvage.engine.integrity import verify_many
 from salvage.engine.models import ScanMode
 from salvage.engine.photorec import PhotoRecEngine
 
@@ -196,7 +197,11 @@ def run_matrix(
                         if not scan_result.success and not scan_result.files:
                             result = error_result(ground_truth, engine_name, scan_result.error or "scan failed", elapsed)
                         else:
-                            result = score(ground_truth, scan_result.files, engine_name, elapsed)
+                            # Verified separately from (and not counted in) scan elapsed time -
+                            # this is scoring instrumentation, not part of what an engine's
+                            # scan() itself does.
+                            verified_files = verify_many(scan_result.files)
+                            result = score(ground_truth, verified_files, engine_name, elapsed)
                     except Exception as exc:
                         elapsed = time.monotonic() - t0
                         traceback.print_exc()
@@ -223,10 +228,15 @@ def run_matrix(
     return results
 
 
+def _pct_or_dash(value: float | None) -> str:
+    return "-" if value is None else f"{value:.0%}"
+
+
 def print_table(results: list[BenchResult]) -> None:
     header = (
         f"{'engine':10s} {'fs':6s} {'scenario':20s} {'recall':>7s} {'precis.':>8s} "
-        f"{'name':>6s} {'path':>6s} {'date':>6s} {'junk':>5s} {'time':>7s}"
+        f"{'name':>6s} {'path':>6s} {'date':>6s} {'junk':>5s} "
+        f"{'intOK':>7s} {'falseINT':>9s} {'falseCOR':>9s} {'time':>7s}"
     )
     print(header)
     print("-" * len(header))
@@ -236,7 +246,9 @@ def print_table(results: list[BenchResult]) -> None:
             continue
         print(
             f"{r.engine:10s} {r.fs:6s} {r.scenario:20s} {r.recall:7.0%} {r.precision:8.0%} "
-            f"{r.name_accuracy:6.0%} {r.path_accuracy:6.0%} {r.date_accuracy:6.0%} {r.junk_count:5d} {r.elapsed_s:6.1f}s"
+            f"{r.name_accuracy:6.0%} {r.path_accuracy:6.0%} {r.date_accuracy:6.0%} {r.junk_count:5d} "
+            f"{_pct_or_dash(r.integrity_precision):>7s} {_pct_or_dash(r.integrity_false_intact_rate):>9s} "
+            f"{_pct_or_dash(r.integrity_false_corrupt_rate):>9s} {r.elapsed_s:6.1f}s"
         )
 
 
@@ -246,17 +258,26 @@ def write_markdown(results: list[BenchResult], out_path: Path) -> None:
         "",
         f"Generated {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
         "",
-        "| Engine | FS | Scenario | Recall | Precision | Name acc. | Path acc. | Date acc. | Junk | Time (s) | Notes |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "Integrity columns score `salvage.engine.integrity.verify()` against ground truth: "
+        "**Int. precision** is the fraction of verifier-INTACT files that are real (byte-exact) "
+        "recoveries; **false-INTACT** is the dangerous error (verifier said INTACT, bytes are wrong); "
+        "**false-CORRUPT** is a real recovery the verifier told the user to distrust.",
+        "",
+        "| Engine | FS | Scenario | Recall | Precision | Name acc. | Path acc. | Date acc. | Junk | "
+        "Int. precision | False-INTACT | False-CORRUPT | Time (s) | Notes |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         if r.error:
-            lines.append(f"| {r.engine} | {r.fs} | {r.scenario} | - | - | - | - | - | - | - | ERROR: {r.error} |")
+            lines.append(
+                f"| {r.engine} | {r.fs} | {r.scenario} | - | - | - | - | - | - | - | - | - | - | ERROR: {r.error} |"
+            )
         else:
             lines.append(
                 f"| {r.engine} | {r.fs} | {r.scenario} | {r.recall:.0%} | {r.precision:.0%} | "
                 f"{r.name_accuracy:.0%} | {r.path_accuracy:.0%} | {r.date_accuracy:.0%} | {r.junk_count} | "
-                f"{r.elapsed_s:.1f} | {r.notes} |"
+                f"{_pct_or_dash(r.integrity_precision)} | {_pct_or_dash(r.integrity_false_intact_rate)} | "
+                f"{_pct_or_dash(r.integrity_false_corrupt_rate)} | {r.elapsed_s:.1f} | {r.notes} |"
             )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(lines) + "\n")
