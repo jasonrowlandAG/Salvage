@@ -2,7 +2,12 @@
 
 Free, open-source file recovery for macOS (Windows/Linux support is scaffolded but untested). A friendly desktop front end over proven open-source engines — the part paid tools like Recoverit, Disk Drill and EaseUS actually charge for.
 
-- **Drives, USB sticks, SD cards, disk images** — deleted-file recovery via [PhotoRec](https://www.cgsecurity.org/wiki/PhotoRec) (signature carving, 480+ formats). Quick scan (free space only) or Deep scan (every sector). Thumbnails, previews, filter by type, recover the ones you want.
+- **Drives, USB sticks, SD cards, disk images** — three scan modes:
+  - **Quick** reads the filesystem's own records of deleted files ([The Sleuth Kit](https://www.sleuthkit.org)), so results keep their **original names, folders and timestamps**.
+  - **Deep** carves every sector by signature ([PhotoRec](https://www.cgsecurity.org/wiki/PhotoRec), 480+ formats) — finds files after a format, but names are lost.
+  - **Thorough** (default) runs both and merges by content hash: carving's recall with real filenames where they survive.
+- **Every result is verified, not guessed** — structural checks (PNG chunk CRCs, ZIP member CRCs, ISO-BMFF atom walks, PDF trailers) label each file **Intact / Partial / Corrupt** with the reason, and carved copies of files that still exist are flagged "Already on disk" and hidden by default.
+- **Preview before you recover** — full-size photo preview with zoom, and real video playback with seek and audio (truncated carved video fails gracefully instead of hanging).
 - **iPhone / iPad** — pulls a local backup over USB via [libimobiledevice](https://libimobiledevice.org), then reads Messages, WhatsApp, Contacts, Notes and Recently Deleted photos out of it, including items sitting in iOS's own Recently Deleted holding areas. Works on existing Finder/iTunes backups too.
 - **Photos & videos on this Mac** — for the Mac's own drive, where raw scanning is impossible (see below). Searches every place media hides — Photos library and its Recently Deleted, Messages attachments, iCloud Drive, cloud-sync folders, iPhone backups — de-duplicates by content, and flags Messages media that has vanished from the Mac but survives in an iPhone backup.
 - No paywall, no "pay to unlock the files we found".
@@ -49,11 +54,38 @@ The bundle is signed with a local self-signed identity (created on first build v
 .venv/bin/python -m pytest
 ```
 
+## Measuring accuracy
+
+Recovery quality is measured, not asserted. `bench/` builds real FAT32/exFAT/HFS+/APFS
+images, applies seven loss scenarios (delete, deleted folder tree, quick format, partial
+overwrite, fragmentation, emptied trash), and scores recall, precision, name/path/date
+accuracy and integrity-verdict correctness per engine.
+
+```bash
+.venv/bin/python -m bench.run --engines photorec,filesystem,combined \
+    --filesystems fat32,exfat --scenarios all --out bench/results/run.json
+```
+
+Latest results live in `bench/results/latest.md`. Highlights: Thorough reaches carving-level
+recall (90% on a deleted folder tree, up from 15% for filesystem records alone) at 100%
+precision, with 100% name and path accuracy on exFAT, and a **0% false-Intact rate** — the
+verifier has never labelled a byte-damaged file as intact on this corpus.
+
+Known weak spots, documented rather than hidden: JPEG/HEIC decoders tolerate bit-flips
+inside image data, so mid-stream corruption can still read as Intact; MP4 verification walks
+the box tree but does not scan inside multi-gigabyte payloads; 7z/RAR return Unknown. FAT and
+exFAT timestamps are decoded off by an hour (DST) and ~20h respectively by this Sleuth Kit
+build. NTFS is wired but untestable on macOS, which cannot format it.
+
 ## Layout
 
 | Path | What |
 |---|---|
 | `salvage/engine/photorec.py` | PhotoRec wrapper: pty-streamed progress, cancel, log-based success check |
+| `salvage/engine/filesystem.py` | Sleuth Kit engine: deleted files with original names, folders, dates |
+| `salvage/engine/combined.py` | Thorough mode: filesystem records + carving, merged by content hash |
+| `salvage/engine/integrity.py` | Structural verification producing Intact/Partial/Corrupt verdicts |
+| `bench/` | Accuracy benchmark: synthetic images, loss scenarios, scoring |
 | `salvage/engine/privileged.py` | One-time admin prompt for raw device scans (launchd-backed on macOS) |
 | `salvage/engine/local_media.py` | Media finder for the Mac: Photos library, Messages, cloud folders, iOS backups |
 | `helper/` | SMAppService root-helper prototype (opt-in build; see `helper/DESIGN.md`) |
