@@ -21,6 +21,13 @@ def _load_plist(name: str) -> dict:
 
 
 def test_macos_parses_real_diskutil_fixture(monkeypatch):
+    # _parse_macos_devices() calls system_volume_mount(), which branches on the live
+    # sys.platform to decide what "/" looks like -- pin it to darwin so this fixture
+    # (recorded macOS diskutil output) parses the same way regardless of which OS is
+    # actually running this test (e.g. on windows-latest CI, system_volume_mount()
+    # would otherwise return "C:\\", so nothing in the fixture would ever match and
+    # every is_system assertion below would wrongly come back False).
+    monkeypatch.setattr(sys, "platform", "darwin")
     top = _load_plist("diskutil_list.plist")
     entries = top["AllDisksAndPartitions"]
 
