@@ -44,7 +44,7 @@ from salvage.engine.models import (
     ScanResult,
     category_for,
 )
-from salvage.engine.privileged import run_privileged
+from salvage.engine.privileged import needs_windows_elevation, run_privileged
 
 _TOOL_NAMES = ("fls", "icat", "fsstat", "mmls")
 _PROGRESS_INTERVAL = 0.2  # ~5/sec, matches PhotoRecEngine
@@ -398,7 +398,7 @@ class FilesystemEngine:
             platform.system() in ("Darwin", "Linux")
             and os.geteuid() != 0
             and str(source).startswith("/dev/")
-        )
+        ) or needs_windows_elevation(str(source))
         if needs_privilege:
             return self._scan_privileged(source, workdir, extensions, on_progress, cancel, include_existing)
         return self._scan_impl(str(source), workdir, extensions, on_progress, cancel, include_existing)
