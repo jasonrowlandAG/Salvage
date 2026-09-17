@@ -321,7 +321,11 @@ class PhotoRecEngine:
                     pass
             if pty_proc is not None:
                 try:
-                    pty_proc.wait()
+                    deadline = time.monotonic() + 10
+                    while pty_proc.isalive() and time.monotonic() < deadline:
+                        time.sleep(0.1)
+                    if pty_proc.isalive():
+                        self._terminate_pty(pty_proc)
                 except Exception:
                     self._terminate_pty(pty_proc)
             elif proc is not None:
