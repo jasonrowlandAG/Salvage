@@ -346,7 +346,7 @@ def test_export_found_copies_by_year_and_skips_duplicates(tmp_path):
 
 def test_default_sources_returns_list_on_macos():
     sources = lm.default_sources()
-    if sys.platform != "darwin":
+    if sys.platform not in ("darwin", "win32"):
         assert sources == []
         return
     assert isinstance(sources, list)
@@ -356,3 +356,86 @@ def test_default_sources_returns_list_on_macos():
         assert isinstance(s, MediaSource)
         if not s.accessible:
             assert s.note
+
+    if sys.platform == "win32":
+        # Nothing macOS-only should leak into the Windows sweep.
+        kinds = {s.kind for s in sources}
+        assert "photos_library" not in kinds
+        assert "messages" not in kinds
+        assert "whatsapp" not in kinds
+
+
+# ---------------------------------------------------------------------------
+# default_sources: Windows, with a deterministic fake home directory
+# ---------------------------------------------------------------------------
+
+
+def test_default_sources_windows_maps_real_folders(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    for name in ("Pictures", "Videos", "Desktop", "Documents", "Downloads"):
+        (tmp_path / name).mkdir()
+    monkeypatch.delenv("OneDrive", raising=False)
+    monkeypatch.delenv("OneDriveConsumer", raising=False)
+    monkeypatch.delenv("APPDATA", raising=False)
+
+    sources = lm.default_sources()
+    by_key = {s.key: s for s in sources}
+
+    assert by_key["pictures"].path == tmp_path / "Pictures"
+    assert by_key["videos"].path == tmp_path / "Videos"
+    assert by_key["desktop"].path == tmp_path / "Desktop"
+    assert by_key["documents"].path == tmp_path / "Documents"
+    assert by_key["downloads"].path == tmp_path / "Downloads"
+    assert all(s.accessible for s in sources)
+    assert "onedrive" not in by_key
+    assert "icloud_photos" not in by_key
+
+
+def test_default_sources_windows_finds_onedrive_and_icloud_photos(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    for name in ("Pictures", "Videos", "Desktop", "Documents", "Downloads"):
+        (tmp_path / name).mkdir()
+    monkeypatch.delenv("APPDATA", raising=False)
+
+    onedrive_dir = tmp_path / "OneDriveRoot"
+    onedrive_dir.mkdir()
+    monkeypatch.setenv("OneDrive", str(onedrive_dir))
+
+    icloud_photos = tmp_path / "Pictures" / "iCloud Photos" / "Photos"
+    icloud_photos.mkdir(parents=True)
+
+    sources = lm.default_sources()
+    by_key = {s.key: s for s in sources}
+
+    assert by_key["onedrive"].path == onedrive_dir
+    assert by_key["onedrive"].kind == "cloud"
+    assert by_key["onedrive"].default_on is False
+    assert by_key["icloud_photos"].path == icloud_photos
+    assert by_key["icloud_photos"].default_on is False
+
+
+def test_default_sources_windows_finds_ios_backups(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    for name in ("Pictures", "Videos", "Desktop", "Documents", "Downloads"):
+        (tmp_path / name).mkdir()
+    monkeypatch.delenv("OneDrive", raising=False)
+    monkeypatch.delenv("OneDriveConsumer", raising=False)
+
+    appdata = tmp_path / "AppData" / "Roaming"
+    monkeypatch.setenv("APPDATA", str(appdata))
+    backup_dir = appdata / "Apple Computer" / "MobileSync" / "Backup" / "00001111-AAAABBBBCCCCDDDD"
+    backup_dir.mkdir(parents=True)
+    (backup_dir / "Manifest.db").write_bytes(b"")
+
+    sources = lm.default_sources()
+    ios_sources = [s for s in sources if s.kind == "ios_backup"]
+    assert len(ios_sources) == 1
+    assert ios_sources[0].path == backup_dir
+
+
+def test_default_sources_non_windows_non_macos_is_empty(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert lm.default_sources() == []
