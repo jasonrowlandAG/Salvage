@@ -21,7 +21,6 @@ class DonePage(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(32, 28, 32, 28)
         outer.setSpacing(16)
-        outer.addStretch()
 
         heading = QLabel("Recovery complete")
         heading.setProperty("role", "heading")

@@ -31,7 +31,7 @@ QLabel[role="error"] {
 
 QLabel[role="badge"] {
     background: #f0e6c8;
-    color: #8a6d1d;
+    color: #7f641b;
     border-radius: 4px;
     padding: 1px 6px;
     font-size: 11px;
@@ -125,5 +125,15 @@ QScrollArea {
 
 QCheckBox, QRadioButton {
     spacing: 8px;
+}
+
+/* QPushButton/QComboBox are deliberately excluded here: in this Qt/PySide6 build,
+   any ":focus" rule on those two widget classes (outline or border, tested both)
+   makes the widget's own text label disappear while focused - confirmed with an
+   isolated repro, worse than having no focus indicator at all. Left as a documented
+   follow-up (needs a QProxyStyle-based focus painter, not a QSS tweak) - see
+   docs/ux-review.md section 6. */
+QLineEdit:focus, QCheckBox:focus, QRadioButton:focus, QListView:focus, QListWidget:focus {
+    border: 2px solid #0a72e8;
 }
 """

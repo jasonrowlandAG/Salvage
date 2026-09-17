@@ -431,6 +431,7 @@ class PreviewPanel(QFrame):
         self.reveal_btn = QPushButton("Reveal in Finder")
         self.reveal_btn.clicked.connect(self._reveal_in_finder)
         v.addWidget(self.reveal_btn, 0, Qt.AlignmentFlag.AlignCenter)
+        v.addStretch(1)
         return page
 
     # -- public API ----------------------------------------------------------

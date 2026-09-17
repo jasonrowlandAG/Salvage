@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QStyle,
     QStyledItemDelegate,
@@ -41,8 +42,8 @@ _BADGE_STYLE = {
     "Deleted": ("#c0392b", "Deleted"),
     "Dup": ("#8a6d1d", "Dup"),
     "iCloud": ("#6e6e73", "iCloud"),
-    "Intact": ("#1d8a3d", "Intact"),
-    "Partial": ("#b8860b", "Partial"),
+    "Intact": ("#1d883c", "Intact"),
+    "Partial": ("#996f09", "Partial"),
     "Corrupt": ("#c0392b", "Corrupt"),
     "On disk": ("#6e6e73", "On disk"),
 }
@@ -65,6 +66,15 @@ _CATEGORY_ICON_PIXMAP = {
     "archive": QStyle.StandardPixmap.SP_DirIcon,
     "other": QStyle.StandardPixmap.SP_FileIcon,
 }
+
+
+def _protect_button_width(button: QPushButton) -> None:
+    """Stops a footer button's own label from being compressed below its sizeHint
+    when a sibling widget (e.g. a long status label) is starved for space — see the
+    footer_row construction below."""
+    policy = button.sizePolicy()
+    policy.setHorizontalPolicy(QSizePolicy.Policy.Minimum)
+    button.setSizePolicy(policy)
 
 
 class FileListModel(QAbstractListModel):
@@ -350,18 +360,25 @@ class ResultsPage(QWidget):
         footer_row.addWidget(self.footer_label)
         self.verify_progress_label = QLabel("")
         self.verify_progress_label.setProperty("role", "subheading")
+        # At large item counts this text ("Checking recovered files… 0 / 30,000") can
+        # get long; let it yield space first rather than squeezing the action buttons
+        # below their own label width (they were clipping to e.g. "ect all (filtere").
+        self.verify_progress_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         footer_row.addWidget(self.verify_progress_label)
         footer_row.addStretch()
         select_all_btn = QPushButton("Select all (filtered)")
         select_all_btn.clicked.connect(self._select_all_filtered)
+        _protect_button_width(select_all_btn)
         footer_row.addWidget(select_all_btn)
         select_none_btn = QPushButton("Select none")
         select_none_btn.clicked.connect(self._select_none)
+        _protect_button_width(select_none_btn)
         footer_row.addWidget(select_none_btn)
         self.recover_btn = QPushButton("Recover selected")
         self.recover_btn.setProperty("role", "primary")
         self.recover_btn.setEnabled(False)
         self.recover_btn.clicked.connect(self._recover_clicked)
+        _protect_button_width(self.recover_btn)
         footer_row.addWidget(self.recover_btn)
         center.addLayout(footer_row)
 

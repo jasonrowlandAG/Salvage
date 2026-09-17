@@ -23,7 +23,7 @@ BIN_DEST="$APP/Contents/Frameworks/salvage/bin/macos"
 mkdir -p "$BIN_DEST"
 
 echo "==> Bundling photorec + libimobiledevice CLI tools"
-TOOLS=(photorec idevice_id ideviceinfo idevicebackup2 afcclient)
+TOOLS=(photorec idevice_id ideviceinfo idevicebackup2 afcclient fls icat fsstat mmls istat)
 BUNDLED_PATHS=()
 for name in "${TOOLS[@]}"; do
     src="/opt/homebrew/bin/$name"

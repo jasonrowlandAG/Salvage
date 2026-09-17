@@ -9,6 +9,7 @@
 # binary analysis does not walk or rewrite install names for arbitrary
 # binaries added here.
 
+import tomllib
 from pathlib import Path
 
 block_cipher = None
@@ -17,6 +18,11 @@ block_cipher = None
 # to this .spec file) into the namespace instead.
 project_root = Path(SPEC).resolve().parent.parent  # noqa: F821
 entry_script = project_root / "salvage" / "__main__.py"
+
+# Single source of truth for the version: pyproject.toml. Previously this spec
+# hardcoded its own copy, which could silently drift from pyproject.toml's.
+with open(project_root / "pyproject.toml", "rb") as _f:
+    _version = tomllib.load(_f)["project"]["version"]
 
 # QtMultimedia/QtMultimediaWidgets back the preview panel's video/audio playback
 # (salvage/ui/preview_panel.py). PyInstaller's PySide6 hooks (add_qt6_dependencies) already
@@ -31,11 +37,20 @@ entry_script = project_root / "salvage" / "__main__.py"
 # a runtime conditional), the multimedia backend would silently disappear from the build.
 _hiddenimports = ["PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets"]
 
+# Bundled so the in-app Licences/About screen (docs/release-checklist.md) can
+# read and display them directly instead of duplicating their text in UI
+# code -- packaging/THIRD_PARTY.md stays the single source of truth for
+# third-party notices. Frozen, these land under sys._MEIPASS/licenses/.
+_datas = [
+    (str(project_root / "LICENSE"), "licenses"),
+    (str(project_root / "packaging" / "THIRD_PARTY.md"), "licenses"),
+]
+
 a = Analysis(
     [str(entry_script)],
     pathex=[str(project_root)],
     binaries=[],
-    datas=[],
+    datas=_datas,
     hiddenimports=_hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -82,13 +97,11 @@ app = BUNDLE(
     bundle_identifier="com.salvage.app",
     info_plist={
         'LSApplicationCategoryType': 'public.app-category.utilities',
-        'CFBundleDisplayName': 'Salvage',
-        'NSHumanReadableCopyright': 'MIT licensed. Bundles PhotoRec (GPLv2) and libimobiledevice (LGPL).',
+        'NSHumanReadableCopyright': 'Copyright Assembly Growth. MIT licensed. Bundles PhotoRec/TestDisk (GPLv2) and libimobiledevice (LGPLv2.1). See Licences in the app for details.',
         "NSHighResolutionCapable": True,
         "CFBundleName": "Salvage",
         "CFBundleDisplayName": "Salvage",
-        "CFBundleShortVersionString": "0.1.0",
-        "CFBundleVersion": "0.1.0",
-        "NSHumanReadableCopyright": "Free and open source.",
+        "CFBundleShortVersionString": _version,
+        "CFBundleVersion": _version,
     },
 )
