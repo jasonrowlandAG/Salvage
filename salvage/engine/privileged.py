@@ -34,7 +34,7 @@ import subprocess
 import sys
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 _OUT_NAME = "photorec.out"
 _ERR_NAME = "photorec.err"  # Windows only: Start-Process can't merge stdout+stderr into one file
@@ -49,7 +49,11 @@ def build_helper_script(photorec_args: list[str], workdir: str | Path, uid: int,
     watch for a cancel marker, chown the workdir back to the invoking user, then mark done.
     Returned as a single command suitable for `sh -c` / `pkexec sh -c`.
     """
-    workdir = Path(workdir)
+    # Always a POSIX path on the target shell (macOS/Linux) regardless of what OS the
+    # Python interpreter building this string happens to run on: on a Windows test
+    # runner, plain Path(workdir) would be a WindowsPath and render backslashes here,
+    # producing a broken shell script.
+    workdir = PurePosixPath(str(workdir))
     workdir_q = shlex.quote(str(workdir))
     out_q = shlex.quote(str(workdir / _OUT_NAME))
     ses_q = shlex.quote(str(workdir / _SES_NAME))
