@@ -184,6 +184,35 @@ def test_windows_handles_malformed_json():
     assert devices._parse_windows_devices("not json", "[]", "[]") == []
 
 
+def test_windows_drive_letter_as_char_code_point(monkeypatch):
+    """Real `Get-Partition`/`Get-Volume | ConvertTo-Json` output serialises the
+    DriveLetter property (a PowerShell System.Char) as its bare numeric UTF-16
+    code point, not a one-character string -- confirmed against a real Windows
+    runner, unlike the hand-written fixtures above. 67 == ord('C')."""
+    monkeypatch.setenv("SystemDrive", "C:")
+    disks_raw = '[{"Number": 0, "FriendlyName": "Disk0", "Size": 1000, "BusType": "SATA"}]'
+    partitions_raw = '[{"DiskNumber": 0, "PartitionNumber": 1, "DriveLetter": 67, "Size": 500}]'
+    volumes_raw = '[{"DriveLetter": 67, "FileSystem": "NTFS", "FileSystemLabel": "Windows", "Size": 500}]'
+
+    result = devices._parse_windows_devices(disks_raw, partitions_raw, volumes_raw)
+    by_id = {d.id: d for d in result}
+
+    assert by_id["disk0"].is_system is True
+    part = by_id["disk0-part1"]
+    assert part.path == "\\\\.\\C:"
+    assert part.mount_point == "C:\\"
+    assert part.filesystem == "NTFS"
+    assert part.is_system is True
+
+
+def test_normalize_drive_letter_variants():
+    assert devices._normalize_drive_letter(69) == "E"
+    assert devices._normalize_drive_letter("e") == "E"
+    assert devices._normalize_drive_letter(None) is None
+    assert devices._normalize_drive_letter("") is None
+    assert devices._normalize_drive_letter(0) is None
+
+
 # ---------------------------------------------------------------------------
 # Linux: lsblk JSON parsing
 # ---------------------------------------------------------------------------
