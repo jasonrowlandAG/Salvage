@@ -8,3 +8,4 @@ build/
 *.egg-info/
 photorec.se*
 photorec.log
+.claude/
