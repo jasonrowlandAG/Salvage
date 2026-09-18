@@ -279,19 +279,119 @@ def _find(files, name: str):
     return next((f for f in files if f.original_name == name), None)
 
 
-def _assert_bytes_equal(recovered: bytes, original: bytes, label: str) -> None:
-    """Byte-exact comparison with a diagnostic-rich failure message -- if recovered
-    content is longer than the original and starts with it, that's cluster slack
-    (icat handing back a whole allocated cluster rather than truncating to the
-    file's recorded logical size); anything else is a genuinely wrong recovery."""
+def _hex_head_tail(data: bytes, n: int = 32) -> str:
+    head = data[:n].hex(" ")
+    tail = data[-n:].hex(" ") if len(data) >= n else "(shorter than n)"
+    return f"first {min(n, len(data))} bytes: {head}\nlast {min(n, len(data))} bytes: {tail}"
+
+
+def _find_offsets(haystack: bytes, needle: bytes, limit: int = 5) -> list[int]:
+    offsets: list[int] = []
+    start = 0
+    while len(offsets) < limit:
+        idx = haystack.find(needle, start)
+        if idx == -1:
+            break
+        offsets.append(idx)
+        start = idx + 1
+    return offsets
+
+
+def _diagnose_byte_mismatch(recovered_file, recovered: bytes, ntfs_volume: dict, label: str) -> str:
+    """Same-length-but-wrong-content is a data-correctness bug, not a truncation
+    problem -- distinguishes the live possibilities rather than guessing: is the
+    recovered content actually a different one of our own planted files (points at
+    cluster-run/inode misattribution)? Does the original's real content exist
+    somewhere else in the raw VHD than where icat read from (points at a sector-size
+    mismatch between what mmls/fsstat assumed for the partition offset and what
+    icat/istat assumed when reading data runs -- both default to 512 bytes/sector
+    unless told otherwise, but mmls can auto-detect a different value from the
+    partition table while fsstat/icat may not follow that same auto-detection)?
+    """
+    original = ntfs_volume[f"{label}_bytes"]
+    vhd_path = ntfs_volume["vhd_path"]
+    raw = vhd_path.read_bytes()
+
+    parts = [
+        f"=== byte mismatch diagnostic for {label} ===",
+        f"recovered: {len(recovered)} bytes\n{_hex_head_tail(recovered)}",
+        f"original: {len(original)} bytes\n{_hex_head_tail(original)}",
+    ]
+
+    # 1) Is the recovered content actually a DIFFERENT one of our own planted files?
+    for other_label in ("jpeg", "docx", "pdf"):
+        if other_label == label:
+            continue
+        other = ntfs_volume[f"{other_label}_bytes"]
+        parts.append(
+            f"recovered == {other_label}_bytes: {recovered == other}; "
+            f"recovered in {other_label}_bytes: {recovered in other}; "
+            f"{other_label}_bytes in recovered: {other in recovered}"
+        )
+
+    # 2) Where does the ORIGINAL's real content actually live in the raw VHD, and
+    #    where did icat read from? mmls/fsstat/istat's own raw output shows whatever
+    #    sector size *they* assumed, independent of each other.
+    original_offsets = _find_offsets(raw, original)
+    recovered_offsets = _find_offsets(raw, recovered) if recovered != original else []
+    parts.append(
+        f"original's exact bytes found in raw VHD at byte offset(s): {original_offsets} "
+        f"(raw VHD is {len(raw)} bytes)"
+    )
+    if recovered != original:
+        parts.append(f"recovered's exact bytes found in raw VHD at byte offset(s): {recovered_offsets}")
+
+    binaries = FilesystemEngine.locate_binaries()
+    if binaries is not None:
+        vhd_str = str(vhd_path)
+        mmls_proc = subprocess.run([str(binaries["mmls"]), vhd_str], capture_output=True, text=True, timeout=60)
+        parts.append(f"--- mmls (raw, full) ---\n{mmls_proc.stdout}\n{mmls_proc.stderr}")
+
+        volumes = FilesystemEngine.probe(vhd_path)
+        if volumes:
+            offset = volumes[0].offset
+            fsstat_proc = subprocess.run(
+                [str(binaries["fsstat"]), "-o", str(offset), vhd_str], capture_output=True, text=True, timeout=60
+            )
+            parts.append(f"--- fsstat -o {offset} (raw, full) ---\n{fsstat_proc.stdout}\n{fsstat_proc.stderr}")
+
+            # istat isn't in filesystem.py's _TOOL_NAMES (never needed at scan time),
+            # so it's not resolvable via locate_binaries() -- look for it next to fls.
+            istat_bin = binaries["fls"].parent / f"istat{binaries['fls'].suffix}"
+            if recovered_file.inode and istat_bin.exists():
+                istat_proc = subprocess.run(
+                    [str(istat_bin), "-o", str(offset), vhd_str, recovered_file.inode],
+                    capture_output=True, text=True, timeout=60,
+                )
+                parts.append(
+                    f"--- istat -o {offset} {vhd_str} {recovered_file.inode} (raw, full) ---\n"
+                    f"{istat_proc.stdout}\n{istat_proc.stderr}"
+                )
+            else:
+                parts.append(f"istat not found next to fls (looked for {istat_bin if recovered_file.inode else 'n/a'})")
+
+    # 3) Rule out the fixture: is ntfs_volume["<label>_bytes"] what was actually
+    #    written, or something regenerated for comparison? (It's read back from disk
+    #    immediately after writing, before deletion -- see _build_ntfs_volume -- so
+    #    this should always be "written", but confirm rather than assume.)
+    parts.append(
+        f"fixture note: ntfs_volume['{label}_bytes'] is read back from the mounted "
+        "volume immediately after writing, before deletion (see _build_ntfs_volume) "
+        "-- not independently regenerated."
+    )
+
+    return "\n\n".join(parts)
+
+
+def _assert_bytes_equal(recovered_file, recovered: bytes, ntfs_volume: dict, label: str) -> None:
+    """Byte-exact comparison. On mismatch, runs the full diagnostic suite (hex dumps,
+    cross-file comparison, raw VHD offset search, mmls/fsstat/istat output) rather
+    than a bare pytest diff -- same-length-but-wrong-content is a data-correctness
+    bug that deserves more than "assert a == b"."""
+    original = ntfs_volume[f"{label}_bytes"]
     if recovered == original:
         return
-    raise AssertionError(
-        f"{label}: recovered {len(recovered)} bytes, original {len(original)} bytes "
-        f"(diff {len(recovered) - len(original)}); "
-        f"recovered.startswith(original)={recovered.startswith(original)}, "
-        f"original.startswith(recovered)={original.startswith(recovered)}"
-    )
+    pytest.fail(_diagnose_byte_mismatch(recovered_file, recovered, ntfs_volume, label))
 
 
 # ---------------------------------------------------------------------------
@@ -352,13 +452,13 @@ def test_filesystem_engine_recovers_deleted_ntfs_files_byte_identical(tmp_path, 
     assert jpeg.original_dir == _JPEG_DIR
     assert jpeg.deleted is True
     assert jpeg.source_engine == "sleuthkit"
-    _assert_bytes_equal(jpeg.path.read_bytes(), ntfs_volume["jpeg_bytes"], "jpeg")
+    _assert_bytes_equal(jpeg, jpeg.path.read_bytes(), ntfs_volume, "jpeg")
 
     docx = _find(result.files, _DOCX_NAME)
     assert docx is not None
     assert docx.original_dir == _DOC_DIR
     assert docx.deleted is True
-    _assert_bytes_equal(docx.path.read_bytes(), ntfs_volume["docx_bytes"], "docx")
+    _assert_bytes_equal(docx, docx.path.read_bytes(), ntfs_volume, "docx")
 
     # The never-deleted pdf is correctly excluded from the default deleted-only scan.
     assert _find(result.files, _PDF_NAME) is None
@@ -372,7 +472,7 @@ def test_filesystem_engine_include_existing_finds_live_pdf(tmp_path, ntfs_volume
     pdf = _find(result.files, _PDF_NAME)
     assert pdf is not None
     assert pdf.deleted is False
-    _assert_bytes_equal(pdf.path.read_bytes(), ntfs_volume["pdf_bytes"], "pdf")
+    _assert_bytes_equal(pdf, pdf.path.read_bytes(), ntfs_volume, "pdf")
 
 
 # ---------------------------------------------------------------------------
