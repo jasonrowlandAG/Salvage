@@ -136,6 +136,14 @@ def _set_disable_delete_notify(value: int) -> None:
     _log(f"\nfsutil behavior set DisableDeleteNotify {value}: rc={proc.returncode}\n{proc.stdout}{proc.stderr}")
 
 
+def _flush_volume(letter: str, when: str) -> None:
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", f"Write-VolumeCache -DriveLetter {letter}"],
+        capture_output=True, text=True, timeout=30,
+    )
+    _log(f"\nWrite-VolumeCache -DriveLetter {letter} ({when}): rc={proc.returncode}\n{proc.stdout}{proc.stderr}")
+
+
 def _make_minimal_docx(blob_size: int = _DOCX_BLOB_SIZE) -> bytes:
     """A genuinely valid (if minimal) OOXML .docx -- enough for PhotoRec's zip-
     signature carving and a real zipfile round-trip, not a full Word doc. Embeds an
@@ -304,6 +312,16 @@ def _plant_and_delete_ntfs_files(mount: Path, letter: str) -> tuple[bytes, bytes
     _log(f"\nplanted on {mount} before delete: {planted}")
     assert len(planted) == 3, f"expected 3 planted files on {mount}, found {planted}"
 
+    # Flush *before* deleting, not just before detaching. NTFS metadata is journaled
+    # and does reach disk promptly -- which is exactly why fls already correctly sees
+    # every planted file's name/folder/size even before this fix -- but a plain
+    # write + close leaves the file's *data* pages dirty in the OS cache; deleting
+    # before those pages are flushed discards them outright, so the MFT ends up
+    # correctly pointing at clusters that were never actually written (reading back
+    # as zeros, not the deleted file's real content). Flushing here is what makes
+    # there be real data on disk for a deletion to orphan in the first place.
+    _flush_volume(letter, "after planting, before deleting")
+
     # Delete two of the three; the pdf stays live, mirroring test_filesystem.py's
     # "one never-deleted file must NOT show up in the default deleted-only scan"
     # assertion.
@@ -314,14 +332,10 @@ def _plant_and_delete_ntfs_files(mount: Path, letter: str) -> tuple[bytes, bytes
     _log(f"remaining on {mount} after delete: {remaining}")
     assert remaining == [str(Path(*_DOC_DIR_PARTS) / _PDF_NAME)]
 
-    # Explicitly flush the volume's cached writes before detaching -- diskpart's
-    # own "detach vdisk" is a controlled dismount and should already do this, but
-    # this makes it an explicit, checkable step rather than an assumption.
-    flush_proc = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", f"Write-VolumeCache -DriveLetter {letter}"],
-        capture_output=True, text=True, timeout=30,
-    )
-    _log(f"\nWrite-VolumeCache -DriveLetter {letter}: rc={flush_proc.returncode}\n{flush_proc.stdout}{flush_proc.stderr}")
+    # And again before detaching -- diskpart's own "detach vdisk" is a controlled
+    # dismount and should already do this, but this makes it an explicit, checkable
+    # step rather than an assumption.
+    _flush_volume(letter, "before detach")
 
     return jpeg_bytes, docx_bytes, pdf_bytes
 
