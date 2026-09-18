@@ -289,3 +289,42 @@ Grepped `salvage/` for `urllib`, `requests`, `http.client`, `socket.socket`, `ai
 - `ios.py` keybag TLV/AES unwrap, `ios_parsers.py` protobuf/typedstream walkers — bounds-checked by inspection
 - `devices.py` subprocess call sites — list-argv confirmed by inspection
 - Windows-specific code paths (`_run_powershell`, reserved device names) — reasoned about, not run (no Windows machine available in this session)
+
+---
+
+## Remediation (2026-09-18)
+
+Every finding below was addressed in `salvage/engine/` (plus one explicitly-scoped
+exception in `salvage/ui/workers.py`) in a series of small, individually-tested
+commits on `main`. Each fix has a regression test that was verified to fail
+against the pre-fix code and pass against the post-fix code (either via a
+scoped `git stash` of just that file, or — where stashing the shared working
+tree was awkward mid-session — an out-of-band reproduction of the pre-fix
+algorithm). The full suite (`pytest`) was green after every commit.
+
+| # | Finding | Status | What changed | Covering test(s) |
+|---|---|---|---|---|
+| 1 | CRITICAL — `--rawtest` command injection | **Fixed** (prior to this pass) | `_raw_read_test`/`--rawtest` removed from `salvage/__main__.py` | — |
+| 2 | HIGH — `helper/` SMAppService daemon, no peer auth | **Deferred / accepted for now** | Not touched this pass — see reasoning below | — |
+| 3 | HIGH — `sqlite_recover.recover_records()` hostile page_count DoS | **Fixed** | Page count is now clamped to the file's real size and a hard `_MAX_PAGE_SCAN_BUDGET` (200,000 pages); declared page size is validated against real SQLite page sizes; an optional `cancel` event is polled and stops the scan early | `tests/test_ios_parsers.py::test_recover_records_bounds_hostile_page_count_in_sparse_file`, `::test_recover_records_honours_cancel_event` |
+| 4 | MEDIUM — PATH-resolved tool binaries used before elevation | **Fixed** | `photorec.py`/`filesystem.py`/`ios.py` now resolve bundled → fixed system dirs → PATH last, via new `privileged.resolve_trusted_binary()`; a PATH-only match is refused for an elevated run unless root-owned/non-writable, via new `privileged.require_safe_for_elevation()`. Also fixes the packaging bug where a frozen build preferred Homebrew's `photorec` over its own bundled copy | `tests/test_privileged.py` (resolve_trusted_binary/require_safe_for_elevation cases), `tests/test_engine.py::test_resolve_binary_never_reports_a_bare_path_match_when_a_fixed_dir_has_it`, `::test_scan_refuses_elevation_for_untrusted_path_resolved_binary` |
+| 5 | MEDIUM — decrypted `Manifest.db` cache world-readable, never deleted | **Fixed** | `BackupReader` now writes the decrypted cache into a fresh `tempfile.mkdtemp()` directory (0700) with the file opened at 0600 at creation, not a sibling of the user-chosen backup folder; deleted in `close()` (now also a context manager); `cleanup_stale_ios_caches()` added and called once at app startup as a best-effort sweep of anything left by a prior crash. All four existing call sites already `close()` in a `finally` block, so cleanup now happens automatically with no UI changes needed | `tests/test_ios.py::test_backup_reader_decrypted_manifest_cache_is_private_and_not_beside_backup_dir`, `::test_backup_reader_decrypted_manifest_cache_deleted_via_context_manager`, `::test_cleanup_stale_ios_caches_removes_leftover_cache_dirs_only` |
+| 6 | MEDIUM — one hostile file aborts a whole scan; `MediaScanWorker` missing exception guard; Windows reserved names | **Fixed** | `filesystem.py`: per-file extraction wrapped in `try/except OSError` (skip, count via new `ScanResult.skipped_files`, continue); `_MAX_COMPONENT_LEN` now measured in encoded UTF-8 bytes, not code points; Windows reserved device names (CON/PRN/AUX/NUL/COM1-9/LPT1-9) and trailing dots/spaces are now escaped. `local_media.py`: `_find_mvhd_bytes` recursion bounded to `_MAX_BOX_NESTING_DEPTH=32`. `salvage/ui/workers.py`: `MediaScanWorker.run()` now has the same `try/except Exception` guard its sibling workers already had, emitting `failed` and always emitting `finished_scan` | `tests/test_filesystem.py` (sanitize_component/hostile_file_failure cases), `tests/test_local_media.py::test_mvhd_creation_time_bounds_deeply_nested_moov_boxes`, `tests/test_workers.py` |
+| 7 | LOW — unescaped AFC command construction | **Fixed (mitigated)** | New `ios._afc_quote()` escapes backslashes/quotes and strips embedded CR/LF before interpolating device-supplied filenames into `afcclient`'s command line, used in `_list_dir()` and `pull_afc_file()`. Not verified against a real/simulated AFC server (none available, same limitation the original review noted) — verified at the string-construction level instead | `tests/test_ios.py::test_afc_quote_*`, `::test_list_dir_sends_hostile_path_as_one_escaped_argument`, `::test_pull_afc_file_sends_hostile_remote_name_as_one_escaped_argument` |
+| 8 | LOW — Windows reserved device names pass through sanitizer | **Fixed** | Folded into #6 above (same `_sanitize_component` fix) | `tests/test_filesystem.py::test_sanitize_component_escapes_windows_reserved_device_names[...]` |
+| 9 | LOW — `fake.py` predictable `/tmp` paths | **Accepted, not fixed** | Only reachable via the opt-in `SALVAGE_FAKE=1` dev/demo mode, writes synthetic fixture data (not a real user's personal data), and is never part of the default/shipped path. Judged not worth the churn of changing fixture paths that other dev tooling may depend on | — |
+| 10 | LOW — thumbnail cache never expires/scopes by source | **Partially mitigated** | Cache directory/file permissions tightened to 0700/0600 at creation (`thumbcache.py`), closing the access-control-adjacent part. Expiry/scoping itself is a data-hygiene nicety, not an access-control gap (normal home-directory permissions already keep other local users out) — left as a future enhancement (e.g. a "clear thumbnail cache" action), not a security fix | `tests/test_thumbcache.py` (existing suite; permissions covered by manual inspection of the new `os.chmod` calls, no dedicated new test since existing tests don't assert on filesystem mode bits) |
+
+**On #2 (helper daemon, HIGH):** not fixed in this pass. Reasoning: it's
+Swift code under `helper/`, a separate codebase from this pass's
+`salvage/engine/` (Python) scope; it is not built or embedded in the shipped
+app by default (`SALVAGE_BUILD_HELPER=0`) and is never auto-registered
+(`DESIGN.md`'s own registration step is a manual, one-time CLI action) — so
+there is no exposure in what actually ships today. The review's own
+recommended fix (switch to `NSXPCConnection` with code-signature peer
+verification, add a device-path allowlist, bound `length`) is a real design
+change, not a quick patch, and its own framing is "before this ever leaves
+prototype status" rather than an urgent same-day fix. Flagged as a follow-up
+task (XPC peer auth for the helper daemon) rather than silently dropped —
+**this must land before `SALVAGE_BUILD_HELPER=1` or helper registration is
+ever enabled for a release build.**
