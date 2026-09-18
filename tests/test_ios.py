@@ -453,6 +453,89 @@ def test_afc_ls_regex_parses_real_file_and_directory_lines():
 
 
 # ---------------------------------------------------------------------------
+# AFC command quoting - see docs/security-review.md finding #7. afcclient reads
+# commands newline-delimited from stdin; `path`/`remote` values here come from
+# whatever a connected device reports as a filename, so they must not be able
+# to break out of the quoted argument and smuggle in a second afcclient command.
+# ---------------------------------------------------------------------------
+
+
+def _assert_no_unescaped_quote(quoted: str) -> None:
+    assert quoted.startswith('"') and quoted.endswith('"')
+    inner = quoted[1:-1]
+    i = 0
+    while i < len(inner):
+        if inner[i] == "\\":
+            i += 2  # an escaped character (\\ or \") - skip both bytes
+            continue
+        assert inner[i] != '"', f"unescaped quote at position {i} in {inner!r}"
+        i += 1
+
+
+def test_afc_quote_escapes_backslashes_and_quotes():
+    assert ios._afc_quote("simple") == '"simple"'
+    assert ios._afc_quote('has "quotes"') == '"has \\"quotes\\""'
+    assert ios._afc_quote("back\\slash") == '"back\\\\slash"'
+
+
+def test_afc_quote_strips_embedded_newlines():
+    # An embedded newline would start a new command line for afcclient regardless
+    # of quoting/escaping, since its input is newline-delimited.
+    quoted = ios._afc_quote("evil\nquit\nget /etc/passwd /tmp/x")
+    assert "\n" not in quoted
+    assert "\r" not in ios._afc_quote("evil\r\nsomething")
+
+
+def test_afc_quote_neutralises_a_hostile_filename_with_embedded_quote_and_semicolon():
+    hostile = '/DCIM/x" ; get "/etc/passwd" "/tmp/pwned'
+    _assert_no_unescaped_quote(ios._afc_quote(hostile))
+
+
+def test_list_dir_sends_hostile_path_as_one_escaped_argument(monkeypatch):
+    captured = {}
+
+    class _Result:
+        stdout = ""
+
+    def fake_run(args, input, capture_output, text, timeout):
+        captured["args"] = args
+        captured["input"] = input
+        return _Result()
+
+    monkeypatch.setattr(ios.subprocess, "run", fake_run)
+    hostile_path = '/DCIM/x" ; quit ; get "/etc/passwd" "/tmp/pwned'
+
+    ios._list_dir("UDID", hostile_path)
+
+    first_line = captured["input"].splitlines()[0]
+    assert first_line.startswith("ls -l ")
+    _assert_no_unescaped_quote(first_line[len("ls -l ") :])
+
+
+def test_pull_afc_file_sends_hostile_remote_name_as_one_escaped_argument(monkeypatch, tmp_path):
+    captured = {}
+
+    class _Result:
+        stdout = ""
+
+    def fake_run(args, input, capture_output, text, timeout):
+        captured["input"] = input
+        return _Result()
+
+    monkeypatch.setattr(ios.subprocess, "run", fake_run)
+    dest = tmp_path / "pulled.jpg"
+    dest.write_bytes(b"stub - just needs to exist() for pull_afc_file to not raise")
+    hostile_remote = '/DCIM/x" ; get "/etc/passwd" "/tmp/pwned'
+
+    ios.pull_afc_file("UDID", hostile_remote, dest)
+
+    line = captured["input"].splitlines()[0]
+    assert line.startswith("get ")
+    remote_arg, _, _dest_arg = line[len("get ") :].partition('" "')
+    _assert_no_unescaped_quote(remote_arg + '"')
+
+
+# ---------------------------------------------------------------------------
 # Real-device tests — skipped unless a device is actually attached
 # ---------------------------------------------------------------------------
 

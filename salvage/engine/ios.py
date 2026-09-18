@@ -782,6 +782,19 @@ _AFC_LS_RE = re.compile(
 _AFC_MTIME_FMT = "%d %b %Y %H:%M:%S"
 
 
+def _afc_quote(value: str) -> str:
+    """Quote a value for afcclient's own interactive command line (it reads commands
+    newline-delimited from stdin and tokenises each line itself). Escapes backslashes
+    and double quotes - same order as privileged._applescript_escape, backslashes
+    first - so a device-supplied filename can't break out of the quoted argument and
+    smuggle in a second afcclient command. Embedded CR/LF are stripped outright:
+    those would start a new command line regardless of quoting, since afcclient's
+    input is newline-delimited."""
+    value = value.replace("\r", "").replace("\n", "")
+    value = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{value}"'
+
+
 def _afc_run(udid: str, commands: list[str], timeout: float = 30) -> str:
     proc_input = "\n".join(commands) + "\nquit\n"
     out = subprocess.run(
@@ -806,7 +819,7 @@ def _strip_afc_chrome(raw: str) -> list[str]:
 
 def _list_dir(udid: str, path: str) -> list[tuple[str, bool, int, float]]:
     """Return [(name, is_dir, size, mtime)] for one directory via `ls -l`."""
-    raw = _afc_run(udid, [f'ls -l "{path}"'])
+    raw = _afc_run(udid, [f"ls -l {_afc_quote(path)}"])
     entries = []
     for line in _strip_afc_chrome(raw):
         m = _AFC_LS_RE.match(line)
@@ -841,7 +854,7 @@ def _walk_afc_dir(udid: str, path: str, out: list[AFCEntry]) -> None:
 def pull_afc_file(udid: str, remote: str, dest: Path) -> Path:
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    _afc_run(udid, [f'get "{remote}" "{dest}"'], timeout=120)
+    _afc_run(udid, [f"get {_afc_quote(remote)} {_afc_quote(str(dest))}"], timeout=120)
     if not dest.exists():
         raise IOSBackupError(f"Failed to pull {remote} from device via AFC.")
     return dest
