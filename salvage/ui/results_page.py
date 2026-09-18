@@ -330,7 +330,8 @@ class ResultsPage(QWidget):
         self.search_edit.textChanged.connect(self._apply_filter)
         sidebar.addWidget(self.search_edit)
         self.category_list = QListWidget()
-        self.category_list.setFixedWidth(180)
+        self.category_list.setMinimumWidth(90)
+        self.category_list.setMaximumWidth(180)
         self.category_list.currentRowChanged.connect(self._on_category_changed)
         sidebar.addWidget(self.category_list, 1)
 
@@ -402,7 +403,8 @@ class ResultsPage(QWidget):
         body.addWidget(center_widget, 1)
 
         self.preview_panel = PreviewPanel(self)
-        self.preview_panel.setFixedWidth(340)
+        self.preview_panel.setMinimumWidth(150)
+        self.preview_panel.setMaximumWidth(340)
         body.addWidget(self.preview_panel)
 
         outer.addLayout(body, 1)

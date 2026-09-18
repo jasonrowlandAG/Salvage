@@ -244,7 +244,8 @@ class MediaResultsPage(QWidget):
 
         sidebar_widget = QWidget()
         sidebar_widget.setLayout(sidebar)
-        sidebar_widget.setFixedWidth(220)
+        sidebar_widget.setMinimumWidth(120)
+        sidebar_widget.setMaximumWidth(220)
         body.addWidget(sidebar_widget)
 
         center = QVBoxLayout()
@@ -290,7 +291,8 @@ class MediaResultsPage(QWidget):
         body.addWidget(center_widget, 1)
 
         self.preview_panel = PreviewPanel(self)
-        self.preview_panel.setFixedWidth(360)
+        self.preview_panel.setMinimumWidth(150)
+        self.preview_panel.setMaximumWidth(360)
         body.addWidget(self.preview_panel)
 
         outer.addLayout(body, 1)

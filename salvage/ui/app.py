@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QProgressDialog, QStackedWidget
 
 from salvage.engine.ios import IOSDevice
@@ -26,6 +26,28 @@ from salvage.ui.source_page import SourcePage
 from salvage.ui.workers import IOSParseWorker, MediaExportWorker, RecoverWorker
 
 
+class _CurrentPageStackedWidget(QStackedWidget):
+    """A QStackedWidget whose size hints come from the *currently shown* page only.
+
+    Plain QStackedWidget reports the maximum minimumSizeHint() across every page it
+    has ever held (so switching pages never resizes the window out from under the
+    user) - with 11 very different wizard pages sharing one stack, that pinned the
+    window's minimum width to whichever page happens to need the most room (the
+    Results page, via its two setFixedWidth side panels) on every OTHER page too,
+    so the window couldn't shrink below ~1200-1360px even on a page with nothing
+    wide in it (docs/ux-review.md finding 6.4). Recompute from just the visible
+    widget instead, and tell the layout system to re-query it on every page change.
+    """
+
+    def minimumSizeHint(self) -> QSize:
+        current = self.currentWidget()
+        return current.minimumSizeHint() if current is not None else super().minimumSizeHint()
+
+    def sizeHint(self) -> QSize:
+        current = self.currentWidget()
+        return current.sizeHint() if current is not None else super().sizeHint()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, fake: bool, engine) -> None:
         super().__init__()
@@ -41,7 +63,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Salvage")
         self.resize(1100, 720)
 
-        self.stack = QStackedWidget()
+        self.stack = _CurrentPageStackedWidget()
+        self.stack.currentChanged.connect(lambda _: self.stack.updateGeometry())
         self.setCentralWidget(self.stack)
 
         self.source_page = SourcePage(self)

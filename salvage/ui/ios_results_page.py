@@ -352,7 +352,8 @@ class IOSResultsPage(QWidget):
         body.setSpacing(16)
 
         self.category_list = QListWidget()
-        self.category_list.setFixedWidth(220)
+        self.category_list.setMinimumWidth(150)
+        self.category_list.setMaximumWidth(220)
         self.category_list.currentRowChanged.connect(self._on_category_changed)
         body.addWidget(self.category_list)
 
