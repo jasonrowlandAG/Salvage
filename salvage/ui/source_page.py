@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from salvage.engine.ios import IOSDevice
 from salvage.engine.models import Device
 from salvage.ui import engine_facade, ios_facade
+from salvage.ui.device_icons import device_icon, phone_icon
 from salvage.ui.format_utils import human_size
 
 _SYSTEM_DISK_WARNING_FILEVAULT_ON = (
@@ -53,8 +54,7 @@ class IOSDeviceRow(QFrame):
         layout.setSpacing(10)
 
         icon_label = QLabel()
-        style = QApplication.style()
-        icon_label.setPixmap(style.standardIcon(QStyle.StandardPixmap.SP_DriveNetIcon).pixmap(28, 28))
+        icon_label.setPixmap(phone_icon().pixmap(28, 28))
         layout.addWidget(icon_label)
 
         text_layout = QVBoxLayout()
@@ -136,13 +136,7 @@ class DeviceRow(QFrame):
             layout.addSpacing(28)
 
         icon_label = QLabel()
-        style = QApplication.style()
-        pix_enum = (
-            QStyle.StandardPixmap.SP_DriveFDIcon
-            if device.is_removable
-            else QStyle.StandardPixmap.SP_DriveHDIcon
-        )
-        icon_label.setPixmap(style.standardIcon(pix_enum).pixmap(28, 28))
+        icon_label.setPixmap(device_icon(device).pixmap(28, 28))
         layout.addWidget(icon_label)
 
         text_layout = QVBoxLayout()
