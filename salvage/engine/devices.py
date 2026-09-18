@@ -416,6 +416,21 @@ def _as_list(parsed: object) -> list[dict]:
     return list(parsed)  # type: ignore[arg-type]
 
 
+def _normalize_drive_letter(value: object) -> str | None:
+    """`Get-Partition`/`Get-Volume`'s DriveLetter property is a PowerShell
+    `System.Char`, which `ConvertTo-Json` serialises as its bare numeric UTF-16
+    code point (e.g. 67), not the letter itself -- confirmed against real
+    PowerShell output on a GitHub Windows runner, not just hand-written test
+    fixtures. Accept either that or an actual one-character string so parsing
+    doesn't silently break depending on the PowerShell version/host doing the
+    serialising."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, int):
+        return chr(value).upper() if value > 0 else None
+    return str(value).upper() or None
+
+
 def _parse_windows_devices(disks_raw: str, partitions_raw: str, volumes_raw: str) -> list[Device]:
     try:
         disks = _as_list(json.loads(disks_raw)) if disks_raw.strip() else []
@@ -425,7 +440,7 @@ def _parse_windows_devices(disks_raw: str, partitions_raw: str, volumes_raw: str
         return []
 
     volume_by_letter = {
-        str(v["DriveLetter"]).upper(): v for v in volumes if v.get("DriveLetter")
+        letter: v for v in volumes if (letter := _normalize_drive_letter(v.get("DriveLetter")))
     }
     system_drive = os.environ.get("SystemDrive", "C:").rstrip(":\\").upper()
 
@@ -436,7 +451,7 @@ def _parse_windows_devices(disks_raw: str, partitions_raw: str, volumes_raw: str
     system_disk_numbers = {
         part.get("DiskNumber")
         for part in partitions
-        if part.get("DriveLetter") and str(part["DriveLetter"]).upper() == system_drive
+        if _normalize_drive_letter(part.get("DriveLetter")) == system_drive
     }
 
     devices: list[Device] = []
@@ -462,10 +477,9 @@ def _parse_windows_devices(disks_raw: str, partitions_raw: str, volumes_raw: str
             )
         )
         for part in partitions_by_disk.get(number, []):
-            letter = part.get("DriveLetter")
+            letter = _normalize_drive_letter(part.get("DriveLetter"))
             if not letter:
                 continue  # unlettered partitions (EFI/Recovery/Reserved) aren't scan/recover targets
-            letter = str(letter).upper()
             vol = volume_by_letter.get(letter, {})
             devices.append(
                 Device(

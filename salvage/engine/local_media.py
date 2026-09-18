@@ -175,10 +175,33 @@ def source_from_backup_dir(path: Path) -> MediaSource:
 
 
 def default_sources() -> list[MediaSource]:
-    """Enumerate every place media hides on this Mac. macOS only."""
-    if sys.platform != "darwin":
-        return []
+    """Enumerate every place media hides on this machine: the full Photos-library /
+    Messages / iCloud Drive sweep on macOS, the real Windows equivalents on Windows
+    (no Photos library or Messages exist there), or an empty list anywhere else."""
+    if sys.platform == "darwin":
+        return _default_sources_macos()
+    if sys.platform == "win32":
+        return _default_sources_windows()
+    return []
 
+
+def _add_ios_backups(backup_root: Path, add: Callable[[str, str, Path, str], None]) -> None:
+    """Adds one MediaSource per iPhone backup found directly under `backup_root`
+    (a MobileSync/Backup-style directory: one subfolder per device UDID)."""
+    if not backup_root.is_dir():
+        return
+    try:
+        entries = sorted(os.listdir(backup_root))
+    except OSError:
+        entries = []
+    for entry in entries:
+        backup_dir = backup_root / entry
+        if not (backup_dir / "Manifest.db").exists():
+            continue
+        add(f"ios_backup_{entry}", _ios_backup_label(backup_dir, entry), backup_dir, "ios_backup")
+
+
+def _default_sources_macos() -> list[MediaSource]:
     home = Path.home()
     sources: list[MediaSource] = []
 
@@ -237,17 +260,7 @@ def default_sources() -> list[MediaSource]:
             )
         )
 
-    backup_root = home / "Library" / "Application Support" / "MobileSync" / "Backup"
-    if backup_root.is_dir():
-        try:
-            entries = sorted(os.listdir(backup_root))
-        except OSError:
-            entries = []
-        for entry in entries:
-            backup_dir = backup_root / entry
-            if not (backup_dir / "Manifest.db").exists():
-                continue
-            add(f"ios_backup_{entry}", _ios_backup_label(backup_dir, entry), backup_dir, "ios_backup")
+    _add_ios_backups(home / "Library" / "Application Support" / "MobileSync" / "Backup", add)
 
     volumes_root = Path("/Volumes")
     if volumes_root.is_dir():
@@ -263,6 +276,54 @@ def default_sources() -> list[MediaSource]:
             except OSError:
                 continue
             add(f"volume_{entry}", entry, vol_path, "folder")
+
+    return sources
+
+
+def _default_sources_windows() -> list[MediaSource]:
+    """Real Windows equivalents of the macOS sweep above -- no Photos library or
+    Messages exist on Windows, so those simply don't appear here."""
+    home = Path.home()
+    sources: list[MediaSource] = []
+
+    def add(key: str, label: str, path: Path, kind: str = "folder") -> None:
+        accessible, note = _check_accessible(path)
+        sources.append(MediaSource(key=key, label=label, path=path, kind=kind, accessible=accessible, note=note))
+
+    add("pictures", "Pictures", home / "Pictures")
+    add("videos", "Videos", home / "Videos")
+    add("desktop", "Desktop", home / "Desktop")
+    add("documents", "Documents", home / "Documents")
+    add("downloads", "Downloads", home / "Downloads")
+
+    onedrive = os.environ.get("OneDrive") or os.environ.get("OneDriveConsumer")
+    if onedrive:
+        onedrive_path = Path(onedrive)
+        accessible, note = _check_accessible(onedrive_path)
+        if accessible:
+            note = "Cloud-only files are fetched on demand — listing is slow; tick to include"
+        sources.append(
+            MediaSource(
+                key="onedrive", label="OneDrive", path=onedrive_path, kind="cloud",
+                accessible=accessible, note=note, default_on=False,
+            )
+        )
+
+    # Apple's iCloud for Windows app puts photos here by default.
+    icloud_photos = home / "Pictures" / "iCloud Photos" / "Photos"
+    if icloud_photos.is_dir():
+        sources.append(
+            MediaSource(
+                key="icloud_photos", label="iCloud Photos", path=icloud_photos, kind="cloud",
+                accessible=os.access(icloud_photos, os.R_OK),
+                note="Cloud-only files are fetched on demand — listing is slow; tick to include",
+                default_on=False,
+            )
+        )
+
+    appdata = Path(os.environ.get("APPDATA", str(home / "AppData" / "Roaming")))
+    _add_ios_backups(appdata / "Apple Computer" / "MobileSync" / "Backup", add)
+    _add_ios_backups(home / "Apple" / "MobileSync" / "Backup", add)
 
     return sources
 
@@ -443,8 +504,18 @@ def _extract_taken(path: Path, ext: str, category: Category, fallback_mtime: flo
 
 _SF_DATALESS = 0x40000000
 
+# Windows equivalent of macOS's dataless-file flag: set on a OneDrive/iCloud "cloud-only"
+# placeholder whose bytes aren't actually on disk yet. Checking st_file_attributes (not
+# opening the file) is what lets us skip it without triggering a download, exactly like
+# the SF_DATALESS check does on macOS.
+_FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x00400000
+_FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x00040000
+
 
 def _is_dataless(st: os.stat_result) -> bool:
+    if sys.platform == "win32":
+        attrs = getattr(st, "st_file_attributes", 0)
+        return bool(attrs & (_FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | _FILE_ATTRIBUTE_RECALL_ON_OPEN))
     return bool(getattr(st, "st_flags", 0) & _SF_DATALESS)
 
 

@@ -44,7 +44,12 @@ from salvage.engine.models import (
     ScanResult,
     category_for,
 )
-from salvage.engine.privileged import require_safe_for_elevation, resolve_trusted_binary, run_privileged
+from salvage.engine.privileged import (
+    needs_windows_elevation,
+    require_safe_for_elevation,
+    resolve_trusted_binary,
+    run_privileged,
+)
 
 _TOOL_NAMES = ("fls", "icat", "fsstat", "mmls")
 _PROGRESS_INTERVAL = 0.2  # ~5/sec, matches PhotoRecEngine
@@ -423,7 +428,7 @@ class FilesystemEngine:
             platform.system() in ("Darwin", "Linux")
             and os.geteuid() != 0
             and str(source).startswith("/dev/")
-        )
+        ) or needs_windows_elevation(str(source))
         if needs_privilege:
             return self._scan_privileged(source, workdir, extensions, on_progress, cancel, include_existing)
         return self._scan_impl(str(source), workdir, extensions, on_progress, cancel, include_existing)
@@ -511,10 +516,29 @@ class FilesystemEngine:
                 m = _FLS_LINE_RE.match(line)
                 if not m:
                     continue
-                if not m.group("mode").startswith("r/r"):
-                    continue  # skip directories (d/d) and virtual entries (v/v, V/V)
+                # mode is "<name-type>/<meta-type><perms...>" (e.g. "r/rrwxrwxrwx" on
+                # NTFS, plain "r/r" on FAT/exFAT/HFS+). The name-type (before the
+                # slash) is the *directory entry*, which NTFS leaves unallocated ("-")
+                # on delete even though the underlying MFT record (the meta-type,
+                # after the slash) is still a perfectly normal "r" regular file --
+                # verified against a real NTFS deletion, where every deleted file's
+                # mode came back "-/rrwxrwxrwx" instead of "r/r...". Deciding "regular
+                # file" from the meta-type alone (not requiring the name-type to also
+                # be "r") is what makes deleted NTFS files show up at all; FAT/exFAT/
+                # HFS+ behaviour is unchanged since their name-type and meta-type
+                # already always agree.
+                _name_type, _, meta_type = m.group("mode").partition("/")
+                if not meta_type.startswith("r"):
+                    continue  # skip directories (d), virtual entries (v/V), etc.
 
                 raw_name = m.group("name")
+                if "($FILE_NAME)" in raw_name:
+                    # NTFS lists a deleted file's $FILE_NAME attribute (pure metadata,
+                    # e.g. size 102 bytes) as a *separate* fls row from its real $DATA
+                    # attribute (the actual file content) -- without this, every NTFS
+                    # file would be "recovered" twice, once as a tiny, wrong-content
+                    # duplicate.
+                    continue
                 deleted = "(deleted" in raw_name
                 if not include_existing and not deleted:
                     continue
@@ -573,6 +597,21 @@ class FilesystemEngine:
                     if actual_size == 0:
                         target.unlink(missing_ok=True)
                         continue
+
+                    # icat can hand back whole allocated clusters for a file's $DATA
+                    # attribute rather than truncating to its recorded logical size
+                    # (cluster slack) -- verified on NTFS, where a deleted file's
+                    # extracted bytes came back padded past its real content with
+                    # trailing garbage from the cluster's previous contents. fls's own
+                    # reported size is read directly from the filesystem's record of the
+                    # file's actual length, so it's authoritative when present; truncate
+                    # to it rather than let every downstream consumer (integrity
+                    # verification, exact-byte comparisons, the file a user actually
+                    # opens) see that trailing garbage as if it were real content.
+                    if size > 0 and actual_size > size:
+                        with open(target, "r+b") as fh:
+                            fh.truncate(size)
+                        actual_size = size
 
                     new_entry = RecoveredFile(
                         path=target,

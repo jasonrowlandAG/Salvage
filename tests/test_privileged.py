@@ -3,10 +3,12 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
-from pathlib import Path
+import sys
+from pathlib import Path, PurePosixPath
 
 import pytest
 
+from salvage.engine import privileged
 from salvage.engine.privileged import build_helper_script, require_safe_for_elevation, resolve_trusted_binary
 
 
@@ -28,7 +30,11 @@ def test_helper_script_quotes_paths_with_spaces_and_apostrophes():
     inner = tokens[11]
 
     # The apostrophe in the path must be escaped correctly for nested single-quoting.
-    assert shlex.quote(str(workdir / "photorec.out")) in inner
+    # build_helper_script always renders POSIX (forward-slash) paths regardless of
+    # host OS (see its own PurePosixPath use) -- compute the expected value the same
+    # way, rather than via plain Path, which renders backslashes on a Windows host.
+    expected_out_path = str(PurePosixPath(str(workdir)) / "photorec.out")
+    assert shlex.quote(expected_out_path) in inner
 
     # The whole inner script must be syntactically valid shell (real parser check, not
     # just our own string matching).
@@ -148,3 +154,102 @@ def test_require_safe_for_elevation_allows_root_owned_non_writable_path_binary(t
     if not trusted.exists():
         pytest.skip("no /bin/ls on this platform")
     require_safe_for_elevation(trusted, from_path=True)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Windows: admin detection / elevation gating (pure logic, runs on every OS)
+# ---------------------------------------------------------------------------
+
+
+def test_is_windows_admin_false_off_windows(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert privileged.is_windows_admin() is False
+
+
+def test_needs_windows_elevation_false_off_windows(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert privileged.needs_windows_elevation(r"\\.\PhysicalDrive0") is False
+
+
+def test_needs_windows_elevation_false_for_image_file(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(privileged, "is_windows_admin", lambda: False)
+    assert privileged.needs_windows_elevation(r"C:\images\disk.raw") is False
+
+
+def test_needs_windows_elevation_true_for_raw_device_when_not_admin(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(privileged, "is_windows_admin", lambda: False)
+    assert privileged.needs_windows_elevation(r"\\.\PhysicalDrive0") is True
+    assert privileged.needs_windows_elevation(r"\\.\E:") is True
+
+
+def test_needs_windows_elevation_false_when_already_admin(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(privileged, "is_windows_admin", lambda: True)
+    # This is the path GitHub's windows-latest runners take: already elevated, so
+    # no prompt is needed even for a raw device path.
+    assert privileged.needs_windows_elevation(r"\\.\PhysicalDrive0") is False
+
+
+# ---------------------------------------------------------------------------
+# Windows: PowerShell helper script construction (pure string logic, runs on
+# every OS -- only actually *executing* the script needs Windows, see below)
+# ---------------------------------------------------------------------------
+
+
+def test_ps_quote_escapes_single_quotes():
+    assert privileged._ps_quote("plain") == "'plain'"
+    assert privileged._ps_quote("O'Brien's Drive") == "'O''Brien''s Drive'"
+
+
+def test_build_windows_ps_script_starts_process_and_watches_cancel(tmp_path):
+    args = [r"C:\tools\photorec_win.exe", "/log", "/d", str(tmp_path / "recovered"), "/cmd", r"\\.\PhysicalDrive1", "search"]
+    script = privileged._build_windows_ps_script(args, tmp_path)
+
+    assert "Start-Process" in script
+    assert "-PassThru" in script
+    assert f"-RedirectStandardOutput '{tmp_path / 'photorec.out'}'" in script
+    assert f"-RedirectStandardError '{tmp_path / 'photorec.err'}'" in script
+    assert "-WindowStyle Hidden" in script
+    assert f"Test-Path '{tmp_path / 'cancel'}'" in script
+    assert "Stop-Process -Id $p.Id -Force" in script
+    assert f"New-Item -ItemType File -Path '{tmp_path / 'done'}'" in script
+    # Every arg after the binary itself is passed through as its own quoted
+    # -ArgumentList element, not reassembled into one string PowerShell would
+    # have to re-split (and could split wrong on an embedded space).
+    assert "'/log', '/d'" in script
+
+
+def test_build_windows_ps_script_is_syntactically_plausible_powershell(tmp_path):
+    args = ["C:\\tools\\fls.exe", "-r", "-p", r"\\.\E:"]
+    script = privileged._build_windows_ps_script(args, tmp_path)
+    # Balanced braces/parens is a cheap sanity check that we didn't forget to close
+    # the while-loop or the argument-list array literal.
+    assert script.count("{") == script.count("}")
+    assert script.count("(") == script.count(")")
+
+
+def test_win_quote_cmdline_quotes_only_when_needed():
+    assert privileged._win_quote_cmdline("-NoProfile") == "-NoProfile"
+    assert privileged._win_quote_cmdline(r"C:\Users\Jay\My Scan") == '"C:\\Users\\Jay\\My Scan"'
+
+
+# ---------------------------------------------------------------------------
+# Windows: actually running the helper -- only meaningful on Windows, and only
+# exercises the "already Administrator" branch, since GitHub's windows-latest
+# runners execute every step already elevated (no interactive session exists
+# to click a UAC prompt through).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows UAC elevation is Windows-only")
+def test_run_privileged_windows_already_admin_runs_helper_directly(tmp_path):
+    assert privileged.is_windows_admin(), (
+        "expected to already be Administrator on a GitHub windows-latest runner; "
+        "if this fails, the elevation-skip path this test exists to prove is untested"
+    )
+    proc = privileged.run_privileged(["cmd.exe", "/c", "echo hello-from-privileged"], tmp_path)
+    proc.wait(timeout=20)
+    assert (tmp_path / "done").exists()
+    assert b"hello-from-privileged" in proc.read_new_output()

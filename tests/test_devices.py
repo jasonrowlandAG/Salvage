@@ -21,6 +21,13 @@ def _load_plist(name: str) -> dict:
 
 
 def test_macos_parses_real_diskutil_fixture(monkeypatch):
+    # _parse_macos_devices() calls system_volume_mount(), which branches on the live
+    # sys.platform to decide what "/" looks like -- pin it to darwin so this fixture
+    # (recorded macOS diskutil output) parses the same way regardless of which OS is
+    # actually running this test (e.g. on windows-latest CI, system_volume_mount()
+    # would otherwise return "C:\\", so nothing in the fixture would ever match and
+    # every is_system assertion below would wrongly come back False).
+    monkeypatch.setattr(sys, "platform", "darwin")
     top = _load_plist("diskutil_list.plist")
     entries = top["AllDisksAndPartitions"]
 
@@ -101,8 +108,17 @@ def test_macos_parses_real_diskutil_fixture(monkeypatch):
     # disk0 is the physical disk hosting the boot container's physical store;
     # the root volume (/) lives on disk3s3s1, two hops down (disk0 -> disk3 -> disk3s3s1).
     # A destination validation check against disk0 must still resolve through that chain.
-    monkeypatch.setattr(os.path, "ismount", lambda p: str(p) == "/")
-    assert devices.is_path_on_device(Path("/Users/whoever"), disk0, result) is True
+    #
+    # This last check needs actual POSIX path semantics (Path("/Users/whoever").resolve()
+    # meaning an absolute path, not a Windows drive-relative one) -- the sys.platform pin
+    # above covers this module's own `if sys.platform == ...` branches, but can't change
+    # which Path subclass the interpreter itself instantiates, since that's driven by the
+    # real os.name, not the monkeypatched sys.platform. So this part only runs on an
+    # actual POSIX host; Windows' own version of this check lives in the
+    # test_is_path_on_device_windows_* tests below.
+    if os.name == "posix":
+        monkeypatch.setattr(os.path, "ismount", lambda p: str(p) == "/")
+        assert devices.is_path_on_device(Path("/Users/whoever"), disk0, result) is True
 
 
 def test_macos_missing_info_is_skipped():
@@ -182,6 +198,35 @@ def test_windows_handles_single_disk_as_bare_object(monkeypatch):
 
 def test_windows_handles_malformed_json():
     assert devices._parse_windows_devices("not json", "[]", "[]") == []
+
+
+def test_windows_drive_letter_as_char_code_point(monkeypatch):
+    """Real `Get-Partition`/`Get-Volume | ConvertTo-Json` output serialises the
+    DriveLetter property (a PowerShell System.Char) as its bare numeric UTF-16
+    code point, not a one-character string -- confirmed against a real Windows
+    runner, unlike the hand-written fixtures above. 67 == ord('C')."""
+    monkeypatch.setenv("SystemDrive", "C:")
+    disks_raw = '[{"Number": 0, "FriendlyName": "Disk0", "Size": 1000, "BusType": "SATA"}]'
+    partitions_raw = '[{"DiskNumber": 0, "PartitionNumber": 1, "DriveLetter": 67, "Size": 500}]'
+    volumes_raw = '[{"DriveLetter": 67, "FileSystem": "NTFS", "FileSystemLabel": "Windows", "Size": 500}]'
+
+    result = devices._parse_windows_devices(disks_raw, partitions_raw, volumes_raw)
+    by_id = {d.id: d for d in result}
+
+    assert by_id["disk0"].is_system is True
+    part = by_id["disk0-part1"]
+    assert part.path == "\\\\.\\C:"
+    assert part.mount_point == "C:\\"
+    assert part.filesystem == "NTFS"
+    assert part.is_system is True
+
+
+def test_normalize_drive_letter_variants():
+    assert devices._normalize_drive_letter(69) == "E"
+    assert devices._normalize_drive_letter("e") == "E"
+    assert devices._normalize_drive_letter(None) is None
+    assert devices._normalize_drive_letter("") is None
+    assert devices._normalize_drive_letter(0) is None
 
 
 # ---------------------------------------------------------------------------

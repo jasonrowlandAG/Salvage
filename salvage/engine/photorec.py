@@ -17,9 +17,15 @@ try:
 except ImportError:
     pty = None  # type: ignore[assignment]
 
+try:
+    import winpty  # pywinpty, Windows only
+except ImportError:
+    winpty = None  # type: ignore[assignment]
+
 from salvage.engine.models import ScanMode, ScanProgress, ScanResult
 from salvage.engine.privileged import (
     PrivilegedProcess,
+    needs_windows_elevation,
     require_safe_for_elevation,
     resolve_trusted_binary,
     run_privileged,
@@ -142,7 +148,14 @@ class PhotoRecEngine:
         for c in fixed:
             if c.exists():
                 return c, False
-        which = shutil.which("photorec")
+        if system == "Windows":
+            # The Windows binary is named photorec_win.exe, not photorec[.exe], so a
+            # plain shutil.which("photorec") below never matches it even when its
+            # folder (e.g. an extracted testdisk-7.2.win64.zip) is on PATH -- check
+            # that name too, before falling back to "photorec" itself.
+            which = shutil.which("photorec_win") or shutil.which("photorec")
+        else:
+            which = shutil.which("photorec")
         return (Path(which), True) if which else (None, False)
 
     def scan(
@@ -173,10 +186,11 @@ class PhotoRecEngine:
             platform.system() in ("Darwin", "Linux")
             and os.geteuid() != 0
             and str(source).startswith("/dev/")
-        )
+        ) or needs_windows_elevation(str(source))
 
         priv_proc: PrivilegedProcess | None = None
         proc: subprocess.Popen | None = None
+        pty_proc = None  # winpty.PtyProcess, Windows non-privileged path only
         master_fd: int | None = None
         reader_thread: threading.Thread | None = None
         out_q: "queue.Queue[bytes | None]" = queue.Queue()
@@ -202,8 +216,10 @@ class PhotoRecEngine:
 
         else:
             # PhotoRec's stdio is fully block-buffered when stdout isn't a tty, so a plain
-            # pipe delivers almost nothing until the process exits. Give it a pty so output
-            # streams as it's produced, which is what makes live progress possible.
+            # pipe delivers almost nothing until the process exits. Give it a pty (POSIX) or
+            # a ConPTY via pywinpty (Windows) so output streams as it's produced, which is
+            # what makes live progress possible; fall back to a plain pipe (degraded/batched
+            # progress, not a hang) if neither is available.
             if pty is not None:
                 master_fd, slave_fd = pty.openpty()
                 proc = subprocess.Popen(
@@ -215,7 +231,13 @@ class PhotoRecEngine:
                     close_fds=True,
                 )
                 os.close(slave_fd)
-            else:
+            elif winpty is not None:
+                try:
+                    pty_proc = winpty.PtyProcess.spawn(args, cwd=str(workdir))
+                except Exception:
+                    pty_proc = None  # fall through to the plain-pipe path below
+
+            if pty is None and pty_proc is None:
                 proc = subprocess.Popen(
                     args,
                     cwd=str(workdir),
@@ -232,6 +254,15 @@ class PhotoRecEngine:
                                 chunk = os.read(master_fd, _CHUNK_SIZE)
                             except OSError:
                                 return
+                        elif pty_proc is not None:
+                            try:
+                                text = pty_proc.read(_CHUNK_SIZE)
+                            except EOFError:
+                                return
+                            if not text:
+                                return
+                            out_q.put(text.encode("utf-8", "replace") if isinstance(text, str) else text)
+                            continue
                         else:
                             assert proc.stdout is not None
                             chunk = proc.stdout.read(_CHUNK_SIZE)
@@ -251,7 +282,10 @@ class PhotoRecEngine:
                     return b""
 
             def do_cancel() -> None:
-                self._terminate(proc)
+                if pty_proc is not None:
+                    self._terminate_pty(pty_proc)
+                else:
+                    self._terminate(proc)
 
         progress = ScanProgress()
         start = time.monotonic()
@@ -297,17 +331,27 @@ class PhotoRecEngine:
         if priv_proc is not None:
             priv_proc.wait(timeout=10)
         else:
-            assert reader_thread is not None and proc is not None
+            assert reader_thread is not None
             reader_thread.join(timeout=2)
             if master_fd is not None:
                 try:
                     os.close(master_fd)
                 except OSError:
                     pass
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self._terminate(proc)
+            if pty_proc is not None:
+                try:
+                    deadline = time.monotonic() + 10
+                    while pty_proc.isalive() and time.monotonic() < deadline:
+                        time.sleep(0.1)
+                    if pty_proc.isalive():
+                        self._terminate_pty(pty_proc)
+                except Exception:
+                    self._terminate_pty(pty_proc)
+            elif proc is not None:
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self._terminate(proc)
 
         log_path = workdir / "photorec.log"
         log_text = log_path.read_text(errors="replace") if log_path.exists() else ""
@@ -350,6 +394,14 @@ class PhotoRecEngine:
                 proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 pass
+
+    @staticmethod
+    def _terminate_pty(pty_proc) -> None:
+        try:
+            if pty_proc.isalive():
+                pty_proc.terminate(force=True)
+        except Exception:
+            pass
 
     @staticmethod
     def _count_files(output_dirs: list[Path]) -> int:

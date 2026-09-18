@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -361,6 +363,15 @@ class SourcePage(QWidget):
             row.setParent(None)
         self._ios_rows = []
 
+        available, reason = ios_facade.ios_recovery_available()
+        if not available:
+            # Existing backup folders (e.g. one made by Apple's own Windows software,
+            # or copied over from a Mac) still work fine -- only live USB device
+            # discovery needs libimobiledevice, which isn't available here.
+            self.ios_empty_label.setText(reason)
+            self.ios_empty_label.setVisible(True)
+            return
+
         devices = ios_facade.list_ios_devices(self.controller.fake)
         for device in devices:
             row = IOSDeviceRow(device)
@@ -374,8 +385,16 @@ class SourcePage(QWidget):
         self.controller.go_to_ios_options(device=device, existing_backup_dir=None)
 
     def _pick_backup_folder(self) -> None:
-        default_dir = Path.home() / "Library" / "Application Support" / "MobileSync" / "Backup"
-        start_dir = str(default_dir) if default_dir.exists() else str(Path.home())
+        if sys.platform == "win32":
+            appdata = os.environ.get("APPDATA")
+            candidates = []
+            if appdata:
+                candidates.append(Path(appdata) / "Apple Computer" / "MobileSync" / "Backup")
+            candidates.append(Path.home() / "Apple" / "MobileSync" / "Backup")
+        else:
+            candidates = [Path.home() / "Library" / "Application Support" / "MobileSync" / "Backup"]
+        default_dir = next((c for c in candidates if c.exists()), None)
+        start_dir = str(default_dir) if default_dir is not None else str(Path.home())
         path_str = QFileDialog.getExistingDirectory(self, "Choose an iPhone backup folder", start_dir)
         if not path_str:
             return

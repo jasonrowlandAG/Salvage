@@ -139,10 +139,17 @@ Open workaround) until notarized.
 
 ## 5. Windows code signing & SmartScreen
 
-**Current state:** no Windows build exists yet (separate work, in
-progress in another worktree). `packaging/windows/installer.nsi` is
-written and documented but **never compiled or run** — this is a macOS
-machine and cannot run `makensis` or exercise the resulting installer.
+**Current state:** a Windows build now exists and is exercised on every
+push: `packaging/salvage_windows.spec` (PyInstaller) plus
+`packaging/build_windows.ps1` build it, and `.github/workflows/ci.yml` runs
+the full test suite — including real NTFS recovery against a diskpart-built
+VHD (`tests/test_windows_ntfs.py`) — on a `windows-latest` GitHub Actions
+runner. See "Windows: findings from real testing" below for what that
+testing found. What's still outstanding is the *installer*:
+`packaging/windows/installer.nsi` is written and documented but **never
+compiled, signed, or run** — nothing in CI drives `makensis` yet, and this
+project has no Windows machine outside CI to exercise the resulting
+installer interactively.
 
 - [ ] Build and test `packaging/windows/installer.nsi` on an actual
       Windows machine or CI runner: install, launch, verify shortcuts
@@ -161,8 +168,73 @@ machine and cannot run `makensis` or exercise the resulting installer.
       UAC elevation prompt (`RequestExecutionLevel admin` in the .nsi
       triggers this) — an unsigned or freshly-signed-with-no-reputation
       exe shows "Unknown publisher," which reads as a red flag to users.
+      Note this is a *separate* UAC prompt from the one `salvage/engine/
+      privileged.py` triggers per-scan for raw device access (see §6) —
+      don't conflate the two when testing.
 
-## 6. First-run experience
+## 6. Windows: findings from real testing
+
+Confirmed via `tests/test_windows_ntfs.py` on a Windows CI runner (a
+diskpart-built NTFS volume in a fixed VHD): `FilesystemEngine` (Quick scan)
+and `PhotoRecEngine` (Deep scan) both correctly recover deleted files on
+NTFS — real names, real folders, and byte-identical content, not just
+"something was found." Two real engine bugs were found and fixed along the
+way (both in `salvage/engine/filesystem.py`):
+
+- `fls`'s mode field for a deleted NTFS entry is `-/r...` (the directory
+  entry is left unallocated), not the `r/r...` FAT/exFAT/HFS+ use — the old
+  check discarded every deleted NTFS file outright. Fixed by deciding
+  "regular file" from the meta-type (after the slash) rather than requiring
+  both sides to agree.
+- NTFS lists a deleted file's `$FILE_NAME` attribute as a separate,
+  metadata-only `fls` row alongside its real `$DATA` row — without
+  filtering, every NTFS file was "recovered" twice, once correctly and once
+  as a tiny wrong-content duplicate.
+- `icat` can hand back a whole allocated cluster rather than truncating to
+  a file's recorded logical size (cluster slack); `FilesystemEngine` now
+  truncates to `fls`'s reported size when known.
+
+**Known limitation, all platforms: TRIM/UNMAP defeats deleted-file
+recovery.** On any TRIM-capable volume — which is most modern Windows and
+macOS machines with an SSD — deleting a file lets the OS/filesystem issue a
+TRIM (Windows) or the equivalent UNMAP notification to the underlying
+storage. The storage device then discards those blocks and reads them back
+as zeros. This is not a bug in Salvage: once TRIM has run, the data is
+physically gone, and no recovery tool (this one included) can get it back.
+This is already documented for macOS/SSDs in the main README's "Honest
+limits" section; it applies identically on Windows. This was confirmed
+directly while building `tests/test_windows_ntfs.py`: deleted files came
+back as correctly-sized, correctly-located clusters of pure zeros —
+`FilesystemEngine`'s MFT/offset handling was correct, the content was
+simply gone. The test fixture disables delete notifications for its own
+plant/delete window (`fsutil behavior set DisableDeleteNotify 1`, restoring
+the original value afterwards) specifically so there is something to
+recover at all; this is a testing necessity, not something the shipped app
+does or should do.
+
+- [ ] **Action before public launch:** make sure user-facing copy (docs,
+      in-app copy, sales materials) is honest that recovery odds drop
+      sharply, often to zero, on an SSD where TRIM has already run for the
+      deleted file — for both Windows and macOS. Don't imply recovery is
+      reliably possible on a TRIM-capable SSD after enough time has passed
+      for the TRIM to execute.
+
+**Minor, unconfirmed either way — Windows scan progress granularity on
+very small/fast scans:** `test_photorec_carves_deleted_ntfs_files_with_live_progress`
+originally asserted that PhotoRec's live progress (via pywinpty) advances
+across at least two distinct sector readings, to distinguish genuine
+streaming from a silent fallback that only reports once at exit. On the
+~95 MB test VHD, PhotoRec's DEEP scan finishes on CI hardware well within a
+second — too fast to reliably sample more than one reading even when
+streaming is working correctly — so the test was relaxed to require only
+that at least one live update arrived. This wasn't re-verified against a
+scan large enough to prove multiple genuinely distinct readings arrive over
+time on Windows; if progress-bar smoothness during a real
+(multi-second-or-longer) Deep scan ever looks coarser on Windows than on
+macOS, check pywinpty's streaming behaviour there specifically before
+assuming it's a UI bug.
+
+## 7. First-run experience
 
 - [ ] **macOS:** the app needs Full Disk Access (System Settings → Privacy
       & Security) for the "Photos & videos on this Mac" finder, and
@@ -172,17 +244,19 @@ machine and cannot run `makensis` or exercise the resulting installer.
       dialog surprise the user — confirm the current UI does this (README
       already documents the behaviour; verify the in-app messaging matches
       before shipping).
-- [ ] **Windows:** confirm whatever privilege model the Windows engine
-      port lands on (likely: an admin prompt for raw device access,
-      mirroring macOS) is explained the same way before the OS prompt
-      fires. Out of scope for this pass — flag for whoever finishes the
-      Windows engine work.
+- [ ] **Windows:** `salvage/engine/privileged.py` now mirrors the macOS
+      design — a UAC prompt (`ShellExecuteW` "runas") once per scan of a
+      raw device path, skipped entirely when the process already holds an
+      elevated token (e.g. GitHub's `windows-latest` runners). Confirm the
+      in-app "why is this prompt appearing" messaging fires before the UAC
+      dialog the same way it does before macOS's administrator prompt —
+      not yet verified against a real (non-CI) Windows desktop.
 - [ ] Both platforms: confirm `packaging/THIRD_PARTY.md`'s note that
       PhotoRec needs raw disk access, and that no bundled component
-      (Sleuth Kit tools especially, see §8 below) silently no-ops without
+      (Sleuth Kit tools especially, see §10 below) silently no-ops without
       explanation when missing.
 
-## 7. Crash / error reporting policy
+## 8. Crash / error reporting policy
 
 No crash or error reporting exists today — nothing in the dependency list
 (`pip list`) includes a crash-reporting SDK (no Sentry, no Crashlytics
@@ -190,7 +264,7 @@ equivalent, nothing). Given the privacy stance below, that's arguably
 correct as a default, but it should be a decision, not an oversight.
 
 - [ ] Decide, explicitly: ship with no automated crash reporting (keeps
-      the "no network calls" claim in §8 literally true, strongest
+      the "no network calls" claim in §9 literally true, strongest
       privacy story, but means you rely entirely on user-reported bugs),
       or add strictly opt-in reporting (never on by default, given this
       app reads recovered personal photos/messages/files — an opt-out or
@@ -202,9 +276,10 @@ correct as a default, but it should be a decision, not an oversight.
       identifiers beyond what's needed to reproduce a crash — write that
       constraint down before choosing a vendor, not after integrating one.
 - [ ] Until then: document for users how to find and send you a crash log
-      manually (macOS: Console.app / `~/Library/Logs/DiagnosticReports`).
+      manually (macOS: Console.app / `~/Library/Logs/DiagnosticReports`;
+      Windows: Event Viewer → Windows Logs → Application).
 
-## 8. Privacy statement
+## 9. Privacy statement
 
 **Verified this pass: Salvage makes no network calls.** Checked by:
 - `pip list` inside `.venv` — no `requests`, `urllib3`, `httpx`, `aiohttp`,
@@ -231,12 +306,12 @@ today and easy to keep true.
       There is no telemetry, no analytics, no account, and no cloud
       component — verify it yourself: the source is on GitHub."*
 - [ ] Re-run the same grep check as part of the pre-release smoke test
-      (§10) for every future release — this claim needs to stay true, not
+      (§11) for every future release — this claim needs to stay true, not
       just be true once.
-- [ ] If crash reporting (§7) is ever added, the privacy statement must be
+- [ ] If crash reporting (§8) is ever added, the privacy statement must be
       updated in the same release, not after.
 
-## 9. Support and update channels
+## 10. Support and update channels
 
 No infrastructure exists for either yet.
 
@@ -256,27 +331,36 @@ No infrastructure exists for either yet.
       GitHub for the bundled components) and document it somewhere a user
       would actually find it (README, and/or the About panel from §3).
 
-## 10. Pre-release smoke test (both platforms)
+## 11. Pre-release smoke test (all platforms)
 
-- [ ] `.venv/bin/python -m pytest` — all tests pass (191 at last count;
-      confirm the count and that nothing regressed).
+- [ ] `.venv/bin/python -m pytest` — all tests pass (confirm the count and
+      that nothing regressed; `.github/workflows/ci.yml` runs this on
+      macOS, Windows and Ubuntu on every push, so a local pass on one
+      platform isn't the whole story).
 - [ ] `SALVAGE_FAKE=1 .venv/bin/python -m salvage` — full flow works
       without touching real hardware.
 - [ ] `packaging/build_mac.sh` — builds cleanly, "no Homebrew references
       remain" check passes.
+- [ ] `packaging/build_windows.ps1` — builds cleanly via
+      `packaging/salvage_windows.spec`; confirm `--print-engine` reports
+      binaries from inside the bundle, not a system install.
 - [ ] `packaging/make_dmg.sh` — builds; mount, launch, and `spctl` checks
       per §4 above.
 - [ ] Real-hardware pass on macOS: scan an actual USB stick or SD card,
       confirm the admin prompt and Full Disk Access flows both trigger
       and explain themselves; if an iPhone is available, run the backup
       flow end to end.
+- [ ] Real-hardware pass on Windows (outside CI): scan an actual USB stick
+      or SD card, confirm the UAC prompt triggers and explains itself per
+      §7 — CI only ever exercises the already-elevated path (see §6),
+      never the interactive UAC prompt a real user sees.
 - [ ] `.venv/bin/python -m bench.run` sanity pass — confirm the accuracy
       benchmark still runs and `bench/results/latest.md` numbers haven't
       silently regressed.
-- [ ] Re-run the privacy grep from §8.
+- [ ] Re-run the privacy grep from §9.
 - [ ] Confirm the Licences/About screen from §3 renders correctly in the
       **built** app.
-- [ ] Windows, once that work lands: install via the signed
+- [ ] Windows installer, once §5 lands: install via the signed
       `Salvage-Setup-<version>.exe`, launch, run a scan against a real
       removable drive, uninstall, confirm no leftover files/registry
       entries.
@@ -314,14 +398,19 @@ Ranked by severity, not by section order above:
    and stored notarytool credentials, none of which exist on this machine
    today. Until it runs, every downloader sees Gatekeeper's rejection
    (confirmed message captured in §4) and needs right-click → Open.
-4. **Windows installer untested** — never built or run, because this is a
-   macOS-only environment. Needs a real Windows pass per §5 before it
-   ships, plus a code-signing certificate (SmartScreen will otherwise warn
-   on every first run).
+4. **Windows installer untested.** The PyInstaller build itself
+   (`packaging/salvage_windows.spec` / `packaging/build_windows.ps1`) is
+   now built and exercised on every push via `.github/workflows/ci.yml`,
+   including a real NTFS recovery pass (§6) — but the NSIS installer
+   (`packaging/windows/installer.nsi`) is still never built or run, because
+   nothing in CI drives `makensis` yet and there's no interactive Windows
+   machine outside CI to click through install/uninstall. Needs a real
+   pass per §5 before it ships, plus a code-signing certificate
+   (SmartScreen will otherwise warn on every first run).
 5. **No Licences/About UI yet** — §3 specifies exactly what's needed and
    the data files are already bundled and ready to read; the screen itself
    hasn't been built (owned by UI work, not this pass).
-6. **No support/update channel decided** — §9. Low effort, not yet done.
-7. **No crash-reporting decision recorded** — §7. Defaulting to "none" is
+6. **No support/update channel decided** — §10. Low effort, not yet done.
+7. **No crash-reporting decision recorded** — §8. Defaulting to "none" is
    defensible and keeps the privacy story simple, but write that decision
    down rather than leaving it implicit.

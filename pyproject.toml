@@ -8,6 +8,10 @@ dependencies = [
     "pillow>=10",
     "pillow-heif>=0.18",
     "pycryptodome>=3.20",
+    # There is no pty on Windows, and PhotoRec/Sleuth Kit block-buffer their stdout
+    # when it isn't a real console -- pywinpty gives the Windows scan path a ConPTY
+    # so live progress works there too (see salvage/engine/photorec.py).
+    "pywinpty>=2.0.14; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

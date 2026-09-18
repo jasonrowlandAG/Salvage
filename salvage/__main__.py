@@ -78,6 +78,12 @@ def _print_engine_info() -> None:
     except ImportError as exc:
         print(f"photorec=<unavailable: {exc}>")
     try:
+        from salvage.engine.filesystem import FilesystemEngine
+
+        print(f"sleuthkit={FilesystemEngine.locate_binaries()}")
+    except ImportError as exc:
+        print(f"sleuthkit=<unavailable: {exc}>")
+    try:
         from salvage.engine.ios import _tool
 
         print(f"idevice_id={_tool('idevice_id')}")
