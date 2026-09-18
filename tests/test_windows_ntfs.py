@@ -20,6 +20,7 @@ not skip quietly.
 from __future__ import annotations
 
 import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -42,6 +43,16 @@ VHD_SIZE_MB = 96
 _JPEG_NAME = "vacation_photo.jpg"
 _DOCX_NAME = "notes_from_trip.docx"
 _PDF_NAME = "invoice_report.pdf"
+
+# NTFS stores a small file's data *resident*, inside its own MFT record, rather than
+# in a data cluster -- so a tiny planted file leaves nothing in the data area for
+# PhotoRec to carve, and a deleted resident record's attribute can be reused/cleared
+# faster than a real allocated cluster. Every planted file here is comfortably over
+# that threshold (order of a few hundred bytes) so this test exercises the normal,
+# realistic non-resident path recovery tools actually deal with.
+_PDF_MARKER = b"SALVAGE-NTFS-TEST-MARKER-3f6a1c"
+_PDF_PAD_SIZE = 250_000
+_DOCX_BLOB_SIZE = 250_000
 
 # fls (Sleuth Kit) always reports paths with forward slashes, regardless of host OS
 # or the filesystem being read -- these directories are planted via pathlib (which
@@ -104,9 +115,12 @@ def _verify_volume_via_powershell(letter: str) -> str:
     return info
 
 
-def _make_minimal_docx() -> bytes:
-    """A genuinely valid (if minimal) OOXML .docx -- just enough for PhotoRec's
-    zip-signature carving and a real zipfile round-trip, not a full Word doc."""
+def _make_minimal_docx(blob_size: int = _DOCX_BLOB_SIZE) -> bytes:
+    """A genuinely valid (if minimal) OOXML .docx -- enough for PhotoRec's zip-
+    signature carving and a real zipfile round-trip, not a full Word doc. Embeds an
+    incompressible, uncompressed "media" blob (docx files routinely embed images)
+    so the final file size stays comfortably non-resident regardless of how well
+    DEFLATE compresses the small XML parts."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(
@@ -135,6 +149,7 @@ def _make_minimal_docx() -> bytes:
             "<w:body><w:p><w:r><w:t>Salvage NTFS recovery test document.</w:t></w:r></w:p></w:body>"
             "</w:document>",
         )
+        z.writestr("word/media/image1.bin", os.urandom(blob_size), compress_type=zipfile.ZIP_STORED)
     return buf.getvalue()
 
 
@@ -189,18 +204,24 @@ def _build_ntfs_volume(tmp_path_factory) -> dict:
         jpeg_dir = mount.joinpath(*_JPEG_DIR_PARTS)
         jpeg_dir.mkdir(parents=True, exist_ok=True)
         jpeg_path = jpeg_dir / _JPEG_NAME
-        Image.new("RGB", (48, 32), color=(90, 140, 200)).save(jpeg_path, "JPEG")
+        # Random pixel noise (not a flat colour) so JPEG's DCT can't compress it away
+        # to a resident-sized file; 600x450 lands comfortably in the hundreds-of-KB
+        # range regardless of quality settings.
+        Image.frombytes("RGB", (600, 450), os.urandom(600 * 450 * 3)).save(jpeg_path, "JPEG", quality=90)
         jpeg_bytes = jpeg_path.read_bytes()
+        _log(f"\njpeg size: {len(jpeg_bytes)} bytes")
 
         doc_dir = mount.joinpath(*_DOC_DIR_PARTS)
         doc_dir.mkdir(parents=True, exist_ok=True)
         docx_path = doc_dir / _DOCX_NAME
         docx_bytes = _make_minimal_docx()
         docx_path.write_bytes(docx_bytes)
+        _log(f"docx size: {len(docx_bytes)} bytes")
 
         pdf_path = doc_dir / _PDF_NAME
-        pdf_bytes = b"%PDF-1.4\nfake pdf content for the Windows NTFS recovery test\n"
+        pdf_bytes = b"%PDF-1.4\n" + _PDF_MARKER + b"\n" + (b"%" + b"x" * 78 + b"\n") * (_PDF_PAD_SIZE // 80)
         pdf_path.write_bytes(pdf_bytes)
+        _log(f"pdf size: {len(pdf_bytes)} bytes")
 
         planted = sorted(str(p.relative_to(mount)) for p in mount.rglob("*") if p.is_file())
         _log(f"\nplanted on {mount} before delete: {planted}")
@@ -215,10 +236,36 @@ def _build_ntfs_volume(tmp_path_factory) -> dict:
         remaining = sorted(str(p.relative_to(mount)) for p in mount.rglob("*") if p.is_file())
         _log(f"remaining on {mount} after delete: {remaining}")
         assert remaining == [str(Path(*_DOC_DIR_PARTS) / _PDF_NAME)]
+
+        # Explicitly flush the volume's cached writes before detaching -- diskpart's
+        # own "detach vdisk" is a controlled dismount and should already do this, but
+        # this makes it an explicit, checkable step rather than an assumption.
+        flush_proc = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", f"Write-VolumeCache -DriveLetter {letter}"],
+            capture_output=True, text=True, timeout=30,
+        )
+        _log(f"\nWrite-VolumeCache -DriveLetter {letter}: rc={flush_proc.returncode}\n{flush_proc.stdout}{flush_proc.stderr}")
     finally:
         detach_script = f'select vdisk file="{vhd_str}"\r\ndetach vdisk\r\nexit\r\n'
         detach_proc = _run_diskpart(detach_script)
         _log(f"\ndiskpart detach stdout:\n{detach_proc.stdout}\nstderr:\n{detach_proc.stderr}")
+
+    # Isolate fixture-vs-engine failures before any engine ever touches this file:
+    # search the VHD's own raw bytes for the deleted JPEG's signature and the PDF's
+    # (still-live, so definitely present) unique marker. If either is missing here,
+    # the planted content never made it into the VHD's data area at all -- a fixture
+    # bug, not something FilesystemEngine/PhotoRec could ever have recovered -- and
+    # this fails right here with that verdict instead of three confusing engine-level
+    # "recovered nothing" failures downstream.
+    raw = vhd_path.read_bytes()
+    jpeg_magic_present = b"\xff\xd8\xff" in raw
+    marker_present = _PDF_MARKER in raw
+    _log(
+        f"\nraw VHD byte scan ({len(raw)} bytes): JPEG SOI marker present={jpeg_magic_present}, "
+        f"PDF marker present={marker_present}"
+    )
+    assert jpeg_magic_present, "JPEG signature not found anywhere in the raw VHD file -- fixture wrote nothing recoverable"
+    assert marker_present, "PDF marker not found anywhere in the raw VHD file -- fixture wrote nothing recoverable"
 
     return {
         "vhd_path": vhd_path,
