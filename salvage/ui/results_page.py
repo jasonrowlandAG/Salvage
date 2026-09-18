@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QPointF, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QStyle,
     QStyledItemDelegate,
-    QStyleOptionButton,
     QVBoxLayout,
     QWidget,
 )
@@ -255,11 +254,30 @@ class FileTileDelegate(QStyledItemDelegate):
 
         checked = index.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked
         cb_rect = QRect(rect.x() + 6, rect.y() + 6, self.CHECKBOX_SIZE, self.CHECKBOX_SIZE)
-        opt = QStyleOptionButton()
-        opt.rect = cb_rect
-        opt.state = QStyle.StateFlag.State_Enabled
-        opt.state |= QStyle.StateFlag.State_On if checked else QStyle.StateFlag.State_Off
-        QApplication.style().drawControl(QStyle.ControlElement.CE_CheckBox, opt, painter)
+        # Hand-drawn rather than QStyle.drawControl(CE_CheckBox, ...): the native
+        # control follows the OS accent colour (confirmed rendering in system red
+        # on a Mac set to a non-blue accent, docs/ux-review.md finding 3.6), which
+        # fights every hardcoded brand colour elsewhere in this delegate (the
+        # selection fill, the badges). A solid white background behind it also
+        # fixes finding 6.3 in passing - the native outline nearly disappeared
+        # against pale thumbnails with no fill of its own.
+        painter.setPen(QColor("#0a72e8") if checked else QColor("#8e8e93"))
+        painter.setBrush(QColor("#0a72e8") if checked else QColor("#ffffff"))
+        painter.drawRoundedRect(cb_rect, 3, 3)
+        if checked:
+            check_pen = painter.pen()
+            check_pen.setColor(QColor("#ffffff"))
+            check_pen.setWidthF(2.0)
+            check_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            check_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(check_pen)
+            painter.drawPolyline(
+                [
+                    QPointF(cb_rect.x() + 4, cb_rect.y() + 9),
+                    QPointF(cb_rect.x() + 7.5, cb_rect.y() + 13),
+                    QPointF(cb_rect.x() + 14, cb_rect.y() + 5),
+                ]
+            )
 
         badges = index.data(BadgeRole) or []
         if badges:
