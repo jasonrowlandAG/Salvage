@@ -35,27 +35,22 @@ exact source-code pointers below are version-specific.
 | PySide6 / Qt 6 (incl. Qt Multimedia's FFmpeg backend) | PySide6 6.11.2 | `LGPL-3.0-only` (the option Salvage uses; also available under `GPL-2.0-only`/`GPL-3.0-only`) | Yes | Include LGPLv3 text + notice; keep Qt dynamically linked (already true) |
 | Pillow | 12.3.0 | `MIT-CMU` | Yes | Include licence text + notice |
 | pycryptodome | 3.23.0 | Public domain (PyCrypto-derived code) + `BSD-2-Clause` (new code) | Yes | Include licence text + notice |
-| The Sleuth Kit — `fls`, `fsstat`, `mmls` | 4.15.0 | `CPL-1.0` | **No — see release blocker below** | If bundled: disclose source availability + how to get it |
-| The Sleuth Kit — `icat` | 4.15.0 | `IPL-1.0` | **No — see release blocker below** | If bundled: disclose source availability + how to get it |
-| libewf (TSK dependency) | 20140816 (Homebrew build) | `LGPL-3.0-or-later` | No (only relevant if TSK is bundled) | If bundled: include LGPLv3 text + notice |
-| afflib (TSK dependency) | 3.7.22 | `BSD-4-Clause` (with a non-standard advertising clause) + public domain | No (only relevant if TSK is bundled) | If bundled: include its own licence text verbatim (non-standard clause, see below) |
-| sqlite3 (TSK dependency) | — | Public domain | No (only relevant if TSK is bundled) | No action needed |
+| The Sleuth Kit — `fls`, `fsstat`, `mmls`, `istat` | 4.15.0 | `CPL-1.0` | Yes | Disclose source availability + how to get it |
+| The Sleuth Kit — `icat` | 4.15.0 | `IPL-1.0` | Yes | Disclose source availability + how to get it |
+| libewf (TSK dependency) | 20140816 (Homebrew build) | `LGPL-3.0-or-later` | Yes | Include LGPLv3 text + notice |
+| afflib (TSK dependency) | 3.7.22 | `BSD-4-Clause` (with a non-standard advertising clause) + public domain | Yes | Include its own licence text verbatim (non-standard clause, see below) |
+| sqlite3 (TSK dependency) | 3.53.4 | Public domain | Yes | No action needed |
 
-**Release blocker, not (currently) a licensing question:** `salvage/engine/filesystem.py`
-invokes `fls`/`icat`/`fsstat`/`mmls` (The Sleuth Kit) for Quick and Thorough
-scan mode, but `packaging/build_mac.sh`'s `TOOLS` array only bundles
-`photorec` and the four libimobiledevice tools — Sleuth Kit binaries are
-never copied into the app bundle. On this development machine
-`FilesystemEngine.locate_binaries()` silently falls back to Homebrew's
-`/opt/homebrew/bin/{fls,icat,fsstat,mmls}`, so the app appears to work — but
-on any other Mac without `brew install sleuthkit`, Quick scan and the
-"Thorough" default mode will raise `FileNotFoundError` immediately. This is
-a functional packaging gap, flagged in `docs/release-checklist.md`; it
-wasn't fixed here because closing it properly also pulls in libewf and
-afflib (both listed above, licences un-vetted before this document) and is a
-product decision (bundle vs. require a separate install), not a pure
-licensing or installer change — see `docs/legal-compliance.md` for the
-options.
+**The Sleuth Kit tools are now bundled.** `packaging/build_mac.sh`'s `TOOLS`
+array copies `fls`, `icat`, `fsstat`, `mmls`, and `istat` into
+`Contents/Frameworks/salvage/bin/macos/` alongside `photorec` and the
+libimobiledevice tools, and `packaging/relink_macho.py` pulls in their
+dependency closure — `libewf.2.dylib`, `libafflib.0.dylib`, and
+`libsqlite3.dylib` — rewriting each to load via `@loader_path` so the whole
+set runs standalone from the bundle. This is why the five rows above are
+now in scope. `istat` is bundled alongside the four tools
+`salvage/engine/filesystem.py` actually invokes; it is not currently called
+by Salvage's own code, but it ships in the bundle and is documented here.
 
 ## Written offer of source code
 
@@ -92,7 +87,7 @@ you are reading this because an upstream link has died, email the address
 above and we will provide the source directly.
 
 The LGPL-licensed components above (libimobiledevice family, OpenSSL,
-PySide6/Qt, libheif, libde265, and — if ever bundled — libewf) do not require
+PySide6/Qt, libheif, libde265, and libewf) do not require
 this written offer: they're used unmodified and linked dynamically (as
 separate `.dylib`/`.framework` files the OS loads at runtime, never merged
 into Salvage's own compiled code), which each library's own LGPL terms treat
@@ -233,15 +228,13 @@ to the public domain; code contributed directly to PyCryptodome is
 BSD-2-Clause, Copyright © the PyCryptodome contributors. Fully permissive;
 no source-disclosure obligation.
 
-### The Sleuth Kit — `fls`, `fsstat`, `mmls` (CPL-1.0) and `icat` (IPL-1.0) — not currently bundled
+### The Sleuth Kit — `fls`, `fsstat`, `mmls`, `istat` (CPL-1.0) and `icat` (IPL-1.0)
 
 **Status:** referenced by `salvage/engine/filesystem.py` and required for
-Quick/Thorough scan mode, but **not currently copied into the app bundle**
-by `packaging/build_mac.sh` — see the release-blocker note under "At a
-glance" above. Documented here so the obligations are already on record for
-whenever that gap closes.
+Quick/Thorough scan mode. Bundled by `packaging/build_mac.sh` into
+`Contents/Frameworks/salvage/bin/macos/`.
 **Version:** 4.15.0 (Homebrew formula).
-**Licence split, precisely:** `fls.cpp` and `fsstat.cpp`
+**Licence split, precisely:** `fls.cpp`, `fsstat.cpp`, and `istat.cpp`
 (`tools/fstools/`) and `mmls.cpp` (`tools/vstools/`) are each marked "This
 software is distributed under the Common Public License 1.0." `icat.cpp`
 (`tools/fstools/`) retains its original Coroner's Toolkit-era notice, "This
@@ -253,24 +246,22 @@ copyleft." (The only GPL-2.0 code anywhere in TSK is a bundled copy of GNU
 **Source:** https://github.com/sleuthkit/sleuthkit/tree/sleuthkit-4.15.0
 **Licence text:** see "Common Public License 1.0" and "IBM Public License
 1.0" below.
-**Obligation if bundled:** CPL-1.0/IPL-1.0 §3 requires stating that source is
+**Obligation:** CPL-1.0/IPL-1.0 §3 requires stating that source is
 available and how to get it — materially lighter than GPL's requirement to
-include source or a standing written offer. A pointer to the URL above, plus
-the licence text, would be sufficient; no written-offer letter like the one
-above is legally required for these two (we'd still recommend including one
-for consistency if this gap is closed).
+include source or a standing written offer. The source pointer above, plus
+the licence text below, are the compliance measure; no written-offer letter
+like the one above is legally required for these two.
 
-### libewf 20140816 and afflib 3.7.22 — Sleuth Kit transitive dependencies, not currently bundled
+### libewf 20140816 and afflib 3.7.22 — Sleuth Kit transitive dependencies
 
-Only relevant if the gap above is ever closed: Homebrew's `fls`/`icat`/`fsstat`/`mmls`
-dynamically link `libewf` (forensic EWF/E01 image format) and `afflib`
-(forensic AFF image format), in addition to `libsqlite3` (public domain, no
-action needed).
+The bundled TSK tools (`fls`/`icat`/`fsstat`/`mmls`/`istat`) dynamically link
+`libewf` (forensic EWF/E01 image format) and `afflib` (forensic AFF image
+format), in addition to `libsqlite3` (public domain, no action needed).
 
 - **libewf** — `LGPL-3.0-or-later`. Source: https://github.com/libyal/libewf.
   Licence text: see "GNU Lesser General Public License v3.0" below. Same
   dynamic-linking treatment as the other LGPL components above.
-- **afflib** — **not a standard licence, read before bundling.**
+- **afflib** — **not a standard licence.**
   BSD-4-Clause (the historical "advertising clause" variant) for code from
   before 24 December 2006, and public domain for Simson Garfinkel's
   contributions after that date (he became a US federal employee). The
@@ -281,8 +272,8 @@ action needed).
   with the traditional 4-clause-BSD opt-out most modern BSD-licensed
   projects allow. Source: https://github.com/sshock/AFFLIBv3. Full text
   reproduced verbatim below ("afflib licence") because it is non-standard —
-  do not substitute a generic BSD template for it. Consider contacting
-  Basis Technology for a waiver if this component is ever bundled; their
+  do not substitute a generic BSD template for it. Recommend seeking a
+  waiver from Basis Technology now that this component is bundled; their
   own `COPYING` file notes they have granted waivers before.
 
 ## Nothing else
@@ -1834,7 +1825,7 @@ That's all there is to it!
 
 ### GNU Lesser General Public License v3.0
 
-_Verbatim text, fetched from https://www.gnu.org/licenses/lgpl-3.0.txt — governs PySide6/Qt, libheif, libde265, and (if ever bundled) libewf. This is the LGPLv3 additional-permissions addendum; it incorporates GPLv3 above by reference (see its own text: "This version of the GNU Lesser General Public License incorporates the terms and conditions of version 3 of the GNU General Public License, supplemented by the additional permissions listed below.")._
+_Verbatim text, fetched from https://www.gnu.org/licenses/lgpl-3.0.txt — governs PySide6/Qt, libheif, libde265, and libewf. This is the LGPLv3 additional-permissions addendum; it incorporates GPLv3 above by reference (see its own text: "This version of the GNU Lesser General Public License incorporates the terms and conditions of version 3 of the GNU General Public License, supplemented by the additional permissions listed below.")._
 
 ```
                    GNU LESSER GENERAL PUBLIC LICENSE
@@ -2215,7 +2206,7 @@ _Verbatim text, fetched from https://www.apache.org/licenses/LICENSE-2.0.txt —
 
 ### Common Public License 1.0
 
-_Verbatim text, fetched from github.com/sleuthkit/sleuthkit/blob/sleuthkit-4.15.0/licenses/cpl1.0.txt — governs the Sleuth Kit tools fls, fsstat, mmls (not currently bundled)._
+_Verbatim text, fetched from github.com/sleuthkit/sleuthkit/blob/sleuthkit-4.15.0/licenses/cpl1.0.txt — governs the Sleuth Kit tools fls, fsstat, mmls, istat._
 
 ```
 Common Public License Version 1.0
@@ -2435,7 +2426,7 @@ any resulting litigation.
 
 ### IBM Public License 1.0
 
-_Verbatim text, fetched from github.com/sleuthkit/sleuthkit/blob/sleuthkit-4.15.0/licenses/IBM-LICENSE — governs the Sleuth Kit tool icat (not currently bundled)._
+_Verbatim text, fetched from github.com/sleuthkit/sleuthkit/blob/sleuthkit-4.15.0/licenses/IBM-LICENSE — governs the Sleuth Kit tool icat._
 
 ```
 IBM PUBLIC LICENSE VERSION 1.0 - CORONER TOOLKIT UTILITIES
@@ -2803,9 +2794,9 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### afflib licence (non-standard — read in full before bundling)
+### afflib licence (non-standard)
 
-_Verbatim text, fetched from github.com/sshock/AFFLIBv3/blob/master/COPYING — governs afflib, a Sleuth Kit transitive dependency, not currently bundled._
+_Verbatim text, fetched from github.com/sshock/AFFLIBv3/blob/master/COPYING — governs afflib, a Sleuth Kit transitive dependency._
 
 ```
 AFFLIB is covered under two copyright regimes.

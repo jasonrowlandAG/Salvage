@@ -179,8 +179,8 @@ machine and cannot run `makensis` or exercise the resulting installer.
       Windows engine work.
 - [ ] Both platforms: confirm `packaging/THIRD_PARTY.md`'s note that
       PhotoRec needs raw disk access, and that no bundled component
-      (Sleuth Kit tools especially, see §8 below) silently no-ops without
-      explanation when missing.
+      silently no-ops without explanation when missing — including the
+      Sleuth Kit tools, now bundled by `packaging/build_mac.sh`.
 
 ## 7. Crash / error reporting policy
 
@@ -287,20 +287,7 @@ No infrastructure exists for either yet.
 
 Ranked by severity, not by section order above:
 
-1. **The Sleuth Kit tools (`fls`/`icat`/`fsstat`/`mmls`) aren't in the
-   installer**, despite `salvage/engine/filesystem.py` requiring them for
-   Quick scan and for the *default* Thorough mode. `packaging/build_mac.sh`'s
-   `TOOLS` array only copies `photorec` and the four libimobiledevice
-   tools. On this dev machine it's masked because
-   `FilesystemEngine.locate_binaries()` falls back to Homebrew's
-   `/opt/homebrew/bin/*` — on any other Mac, Quick/Thorough scan will raise
-   `FileNotFoundError` immediately. Not fixed in this pass: closing it
-   properly also pulls in `libewf` and `afflib` (licences now vetted in
-   `packaging/THIRD_PARTY.md`, but afflib's non-standard advertising clause
-   needs a decision) and is a product call, not a docs/installer change.
-   See `docs/legal-compliance.md`'s "practical, lowest-friction path"
-   section for both options.
-2. **x265, bundled inside the pillow-heif wheel, is GPL-2.0** and — because
+1. **x265, bundled inside the pillow-heif wheel, is GPL-2.0** and — because
    it's dynamically loaded *into the same process* as Salvage's own code
    (unlike PhotoRec, which is a clean subprocess) — creates a genuinely
    contested "does this make the combined work GPL" question. Recommended
@@ -309,19 +296,19 @@ Ranked by severity, not by section order above:
    this pass — it's an engineering task (rebuild/re-vendor libheif), not a
    doc change. See `docs/legal-compliance.md` for the full analysis; get a
    real lawyer's opinion before a *paid* launch if x265 is still bundled.
-3. **Not notarized.** `packaging/notarize.sh` is written but has never
+2. **Not notarized.** `packaging/notarize.sh` is written but has never
    run — needs a paid Apple Developer account, a Developer ID certificate,
    and stored notarytool credentials, none of which exist on this machine
    today. Until it runs, every downloader sees Gatekeeper's rejection
    (confirmed message captured in §4) and needs right-click → Open.
-4. **Windows installer untested** — never built or run, because this is a
+3. **Windows installer untested** — never built or run, because this is a
    macOS-only environment. Needs a real Windows pass per §5 before it
    ships, plus a code-signing certificate (SmartScreen will otherwise warn
    on every first run).
-5. **No Licences/About UI yet** — §3 specifies exactly what's needed and
+4. **No Licences/About UI yet** — §3 specifies exactly what's needed and
    the data files are already bundled and ready to read; the screen itself
    hasn't been built (owned by UI work, not this pass).
-6. **No support/update channel decided** — §9. Low effort, not yet done.
-7. **No crash-reporting decision recorded** — §7. Defaulting to "none" is
+5. **No support/update channel decided** — §9. Low effort, not yet done.
+6. **No crash-reporting decision recorded** — §7. Defaulting to "none" is
    defensible and keeps the privacy story simple, but write that decision
    down rather than leaving it implicit.

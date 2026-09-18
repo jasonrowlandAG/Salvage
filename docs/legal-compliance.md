@@ -73,15 +73,16 @@ leave only unambiguous LGPL components. This wasn't done in this pass
 (it requires rebuilding libheif from source, which is a real engineering
 task, not a doc change) — flagged here as the recommended fix.
 
-### 2. The Sleuth Kit tools your own code depends on aren't in the installer
+### 2. afflib's non-standard advertising clause, pulled in now that the
+Sleuth Kit tools are bundled
 
-Not itself a hard legal question (CPL-1.0/IPL-1.0 are lenient, see below) —
-but `docs/release-checklist.md` and `packaging/THIRD_PARTY.md` both flag it
-as a functional release blocker, and closing it pulls in two more licenses
-(libewf, and afflib's non-standard advertising clause) that need a decision,
-not just documentation. Worth a lawyer's five minutes only for the afflib
-clause if you decide to bundle it; the CPL/IPL obligations themselves are
-routine.
+The packaging gap is closed: `packaging/build_mac.sh` now bundles
+`fls`/`icat`/`fsstat`/`mmls`/`istat`, and `packaging/relink_macho.py` pulls
+in their two additional licenses (libewf, and afflib's non-standard
+advertising clause) automatically. The CPL-1.0/IPL-1.0 obligations
+themselves are routine and are documented in `packaging/THIRD_PARTY.md`.
+What remains is the afflib advertising clause — still the one item genuinely
+worth a lawyer's five minutes, or a waiver request to Basis Technology.
 
 ---
 
@@ -98,10 +99,10 @@ routine.
 | PySide6 / Qt 6 (+ bundled FFmpeg) | 6.11.2 | LGPL-3.0-only (elected option) | §4(d): dynamic linking + notice; relies on Hardened Runtime staying off, see below | Done — text + notice; **re-check if/when Hardened Runtime is enabled for notarization** |
 | Pillow | 12.3.0 | MIT-CMU | Notice only | Done |
 | pycryptodome | 3.23.0 | Public domain + BSD-2-Clause | Notice only | Done |
-| The Sleuth Kit: fls, fsstat, mmls | 4.15.0 | CPL-1.0 | §3: disclose source availability | Not bundled — documented for when it is |
-| The Sleuth Kit: icat | 4.15.0 | IPL-1.0 | §3: disclose source availability | Not bundled — documented for when it is |
-| libewf | 20140816 | LGPL-3.0-or-later | §4(d): dynamic linking + notice | Not bundled — documented for when it is |
-| afflib | 3.7.22 | BSD-4-Clause (non-standard advertising clause) + public domain | Verbatim notice, non-removable without Basis Technology's permission | Not bundled — **needs a human decision, not just documentation, if it ever is** |
+| The Sleuth Kit: fls, fsstat, mmls, istat | 4.15.0 | CPL-1.0 | §3: disclose source availability | Done — bundled; text + source pointer in `THIRD_PARTY.md` |
+| The Sleuth Kit: icat | 4.15.0 | IPL-1.0 | §3: disclose source availability | Done — bundled; text + source pointer in `THIRD_PARTY.md` |
+| libewf | 20140816 | LGPL-3.0-or-later | §4(d): dynamic linking + notice | Done — bundled; text + notice |
+| afflib | 3.7.22 | BSD-4-Clause (non-standard advertising clause) + public domain | Verbatim notice, non-removable without Basis Technology's permission | Bundled — **still needs a human decision / waiver request to Basis Technology** |
 
 Full per-component detail, exact source URLs, and every license's complete
 text are in `packaging/THIRD_PARTY.md`.
@@ -114,9 +115,8 @@ text are in `packaging/THIRD_PARTY.md`.
 redistribution of the unmodified binary. What must accompany it, all now
 done in `packaging/THIRD_PARTY.md`:
 
-1. **License texts** for every distinct license in use (GPLv2, GPLv3+LGPLv3,
-   LGPLv2.1, Apache-2.0 today; CPL-1.0/IPL-1.0 only if the Sleuth Kit gap
-   closes).
+1. **License texts** for every distinct license in use today (GPLv2,
+   GPLv3+LGPLv3, LGPLv2.1, Apache-2.0, CPL-1.0/IPL-1.0).
 2. **Copyright/attribution notices** for each component, naming its actual
    author/project — not Assembly Growth.
 3. **A written offer of source** for the GPL-covered components (PhotoRec;
@@ -281,21 +281,17 @@ exists in the repo. If x265 isn't removed before a paid launch, get the
 lawyer review flagged above first; the exposure is higher once money is
 changing hands and a court is more likely to have a live case to decide.
 
-**The Sleuth Kit, if/when the packaging gap closes:** two options, genuinely
-different in effort —
-- **Bundle it like PhotoRec** (copy `fls`/`fsstat`/`mmls`/`icat` into
-  `Contents/Frameworks/salvage/bin/macos/` in `packaging/build_mac.sh`,
-  mirroring the existing `TOOLS` array pattern, and let
-  `packaging/relink_macho.py` sweep in `libewf`/`afflib`/`libsqlite3`
-  automatically). Legally cheap (CPL-1.0/IPL-1.0 are lenient, libewf is
-  ordinary LGPL) except for afflib's non-standard advertising clause, which
-  needs a one-time read of `packaging/THIRD_PARTY.md`'s afflib section
-  and probably an email to Basis Technology for a waiver.
-- **Ship it as a detected, separately-installed dependency** (what
-  effectively happens today by accident: `FilesystemEngine.locate_binaries()`
-  already falls back to `brew install sleuthkit`'s location). Zero new
-  licensing surface, but means Quick/Thorough scan doesn't work out of the
-  box for anyone without Homebrew — a real product downside for a
-  consumer-facing free/paid app, which is why this document recommends
-  fixing the bundling instead. That's a build-script and product decision,
-  not made in this pass — see `docs/release-checklist.md`.
+**The Sleuth Kit — decision made and executed:** bundling was chosen over
+shipping it as a detected, separately-installed dependency (the latter was
+rejected because Quick/Thorough scan would not work out of the box for
+anyone without Homebrew — a real product downside for a consumer-facing
+free/paid app). `packaging/build_mac.sh` now copies
+`fls`/`fsstat`/`mmls`/`icat`/`istat` into
+`Contents/Frameworks/salvage/bin/macos/` via its `TOOLS` array, and
+`packaging/relink_macho.py` sweeps in `libewf`/`afflib`/`libsqlite3`
+automatically, relinking everything to `@loader_path`. In practice this was
+legally cheap (CPL-1.0/IPL-1.0 are lenient, libewf is ordinary LGPL) except
+for afflib's non-standard advertising clause, which still needs a one-time
+read of `packaging/THIRD_PARTY.md`'s afflib section and an email to Basis
+Technology for a waiver — the one residual action item from this decision —
+see `docs/release-checklist.md`.
