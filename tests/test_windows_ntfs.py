@@ -285,17 +285,24 @@ def _find(files, name: str):
 
 
 def test_diagnose_ntfs_fls_output(ntfs_volume):
-    """Not a correctness test -- dumps raw `fls` output against the NTFS VHD in two
-    forms so a human can see exactly how this TSK build represents a deleted NTFS
-    entry. filesystem.py's parser (_FLS_LINE_RE + the " (deleted)" suffix check on
-    the name column) was written and verified only against FAT32/exFAT/HFS+ output
-    captured on macOS; NTFS may express deletion differently (e.g. via the mode/type
-    column rather than a literal "(deleted)" suffix, or via -realloc entries)."""
+    """Not a correctness test -- always fails, with raw `fls` output against the NTFS
+    VHD (in two forms) embedded in the failure message, so a human can see exactly
+    how this TSK build represents a deleted NTFS entry. filesystem.py's parser
+    (_FLS_LINE_RE + the " (deleted)" suffix check on the name column) was written and
+    verified only against FAT32/exFAT/HFS+ output captured on macOS; NTFS may express
+    deletion differently (e.g. via the mode/type column rather than a literal
+    "(deleted)" suffix, or via -realloc entries).
+
+    Forced failure (rather than _log()/print()) is deliberate: pytest's default
+    capture redirects the underlying OS file descriptors, which sys.__stderr__
+    still writes through -- so a *passing* test's diagnostic output is silently
+    discarded regardless of which Python-level stream object you write to. A
+    failing test's captured output is always shown, capture mode or not.
+    """
     binaries = FilesystemEngine.locate_binaries()
     assert binaries is not None, "Sleuth Kit tools not found"
 
     volumes = FilesystemEngine.probe(ntfs_volume["vhd_path"])
-    _log(f"\nFilesystemEngine.probe(vhd_path): {volumes}")
     assert volumes, "probe() found no volumes on the NTFS VHD -- mmls/fsstat parsing itself is the problem"
     offset = volumes[0].offset
     vhd_str = str(ntfs_volume["vhd_path"])
@@ -306,17 +313,19 @@ def test_diagnose_ntfs_fls_output(ntfs_volume):
         ("fls -r -p -o <offset> (no -m, no -f, for comparison)",
          [str(binaries["fls"]), "-r", "-p", "-o", str(offset), vhd_str]),
     ]
+    sections = [f"FilesystemEngine.probe(vhd_path): {volumes}"]
     for label, args in invocations:
         proc = subprocess.run(args, capture_output=True, text=True, timeout=60)
         matches = [
             line for line in proc.stdout.splitlines()
             if _JPEG_NAME in line or _DOCX_NAME in line or _PDF_NAME in line
         ]
-        _log(
-            f"\n=== {label} ===\nargs: {args}\nreturncode: {proc.returncode}\n"
-            f"lines matching known filenames:\n" + "\n".join(matches) + "\n"
+        sections.append(
+            f"=== {label} ===\nargs: {args}\nreturncode: {proc.returncode}\n"
+            "lines matching known filenames:\n" + "\n".join(matches) + "\n"
             f"--- full stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
         )
+    pytest.fail("\n\n".join(sections))
 
 
 # ---------------------------------------------------------------------------
@@ -372,10 +381,16 @@ def test_photorec_carves_deleted_ntfs_files_with_live_progress(tmp_path, ntfs_vo
         ntfs_volume["vhd_path"], tmp_path, mode=ScanMode.DEEP, on_progress=progress_updates.append
     )
 
+    # PhotoRec's own log records what it thinks the source's size/partition layout
+    # is -- useful to tell "opened the .vhd fine but carved nothing real" apart from
+    # "never correctly read the .vhd at all" (e.g. confused by the 512-byte VHD
+    # footer, or a wrong partition_none offset assumption).
     _log(
         f"\nPhotoRec result: success={result.success} cancelled={result.cancelled} error={result.error!r}\n"
         f"carved {len(result.files)} file(s): "
-        + ", ".join(f"{f.name} ({f.size} bytes)" for f in result.files)
+        + ", ".join(f"{f.name} ({f.size} bytes)" for f in result.files[:20])
+        + (" ..." if len(result.files) > 20 else "")
+        + f"\n--- photorec.log ---\n{result.log_text}"
     )
 
     assert result.success, result.error
