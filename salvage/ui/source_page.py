@@ -26,17 +26,18 @@ from salvage.ui.device_icons import device_icon, phone_icon
 from salvage.ui.format_utils import human_size
 
 _SYSTEM_DISK_WARNING_FILEVAULT_ON = (
-    "This is your Mac's startup disk. macOS doesn't allow raw scanning of it, and FileVault is "
-    "on so the data is encrypted — a scan will find nothing. To get files back from this Mac: "
-    "check the Trash, iCloud Drive → Recently Deleted, Time Machine, or APFS local snapshots. "
-    "Salvage can scan external drives, USB sticks, SD cards and disk images."
+    "This is your Mac's startup disk. macOS blocks direct scanning of it — that's true no "
+    "matter what permissions Salvage has, and this disk is also encrypted with FileVault. "
+    "To get files back from this Mac, try the Trash, iCloud Drive → Recently Deleted, Time "
+    "Machine, or the \"Photos & videos on this Mac\" search above. Salvage can scan external "
+    "drives, USB sticks, SD cards and disk images."
 )
 _SYSTEM_DISK_WARNING_FILEVAULT_OFF = (
-    "This is your Mac's startup disk. macOS doesn't allow raw scanning of it unless Full Disk "
-    "Access is granted to Salvage (System Settings → Privacy & Security → Full Disk Access → "
-    "add Salvage). To get files back from this Mac: check the Trash, iCloud Drive → Recently "
-    "Deleted, Time Machine, or APFS local snapshots. Salvage can scan external drives, USB "
-    "sticks, SD cards and disk images."
+    "This is your Mac's startup disk. macOS blocks direct scanning of it — that's true no "
+    "matter what permissions Salvage has, including Full Disk Access. To get files back from "
+    "this Mac, try the Trash, iCloud Drive → Recently Deleted, Time Machine, or the \"Photos & "
+    "videos on this Mac\" search above. Salvage can scan external drives, USB sticks, SD cards "
+    "and disk images."
 )
 
 
@@ -326,10 +327,15 @@ class SourcePage(QWidget):
         filevault_on = engine_facade.filevault_enabled(self.controller.fake)
         if filevault_on:
             self.system_disk_warning.setText(_SYSTEM_DISK_WARNING_FILEVAULT_ON)
-            self.continue_btn.setEnabled(False)
         else:
             self.system_disk_warning.setText(_SYSTEM_DISK_WARNING_FILEVAULT_OFF)
-            self.continue_btn.setEnabled(True)
+        # The kernel refuses raw reads of any mounted volume on a running Apple
+        # Silicon Mac regardless of FileVault or Full Disk Access (README.md's
+        # "Honest limits") - a scan of the startup disk can never find anything,
+        # so Continue stays disabled either way rather than only when FileVault
+        # happens to be on (previously true, which is what let the FileVault-off
+        # message above imply granting FDA would help - it never would).
+        self.continue_btn.setEnabled(False)
         self.system_disk_warning.show()
 
     def open_disk_image_dialog(self) -> None:
