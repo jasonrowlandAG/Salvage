@@ -23,7 +23,7 @@ from salvage.ui.results_page import ResultsPage
 from salvage.ui.scan_page import ScanPage
 from salvage.ui.session import ScanSession
 from salvage.ui.source_page import SourcePage
-from salvage.ui.workers import IOSParseWorker, RecoverWorker
+from salvage.ui.workers import IOSParseWorker, MediaExportWorker, RecoverWorker
 
 
 class MainWindow(QMainWindow):
@@ -34,6 +34,8 @@ class MainWindow(QMainWindow):
         self.session = ScanSession()
         self._progress_dialog: QProgressDialog | None = None
         self._recover_worker: RecoverWorker | None = None
+        self._media_export_worker: MediaExportWorker | None = None
+        self._media_export_items: list = []
         self._ios_parse_worker: IOSParseWorker | None = None
 
         self.setWindowTitle("Salvage")
@@ -228,16 +230,41 @@ class MainWindow(QMainWindow):
     def export_media_results(self, items) -> None:
         export_dir = self.session.media_export_dir
         assert export_dir is not None
-        written = media_facade.export(items, export_dir)
+        self._media_export_items = items
+
+        self._progress_dialog = QProgressDialog("Exporting files…", "", 0, len(items), self)
+        self._progress_dialog.setWindowTitle("Exporting")
+        self._progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self._progress_dialog.setMinimumDuration(0)
+        self._progress_dialog.setCancelButton(None)
+        self._progress_dialog.setValue(0)
+        self._progress_dialog.show()
+
+        self._media_export_worker = MediaExportWorker(items, export_dir, self)
+        self._media_export_worker.progress.connect(lambda done, _total: self._progress_dialog.setValue(done))
+        self._media_export_worker.finished_export.connect(self._on_media_export_finished)
+        self._media_export_worker.start()
+
+    def _on_media_export_finished(self, written: list[Path], failed: int) -> None:
+        if self._progress_dialog is not None:
+            self._progress_dialog.close()
+        export_dir = self.session.media_export_dir
+        assert export_dir is not None
+        items = self._media_export_items
         self.session.recovered_paths = written
         preview_only_count = sum(1 for it in items if it.preview_only and it.duplicate_of is None)
-        note = None
+        notes = []
         if preview_only_count:
             plural = "s" if preview_only_count != 1 else ""
-            note = (
+            notes.append(
                 f"{preview_only_count} file{plural} were iCloud-only in Photos — a local preview "
                 "was copied instead of the full-resolution original."
             )
+        if failed:
+            plural = "s" if failed != 1 else ""
+            was_were = "were" if failed != 1 else "was"
+            notes.append(f"{failed} file{plural} could not be copied and {was_were} skipped.")
+        note = "\n".join(notes) if notes else None
         self.done_page.set_result(written, export_dir, note=note)
         self.stack.setCurrentWidget(self.done_page)
 
@@ -256,6 +283,9 @@ class MainWindow(QMainWindow):
         recover_worker = self._recover_worker
         if recover_worker is not None and recover_worker.isRunning():
             recover_worker.wait(5000)
+        media_export_worker = self._media_export_worker
+        if media_export_worker is not None and media_export_worker.isRunning():
+            media_export_worker.wait(5000)
         ios_backup_worker = self.ios_backup_page.worker
         if ios_backup_worker is not None and ios_backup_worker.isRunning():
             ios_backup_worker.cancel_event.set()

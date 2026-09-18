@@ -476,7 +476,10 @@ def test_media_search_finds_everything_and_only_that(tmp_path, monkeypatch):
     selected = model.checked_files()
     assert len(selected) == 3
     rp._export_clicked()
-    _process(app, ms=50)
+    # Export now runs on a background QThread (MediaExportWorker) instead of
+    # synchronously on the UI thread - wait for it to actually finish rather than
+    # assuming it's done after one short sleep.
+    _wait_until(app, lambda: window.stack.currentWidget() is window.done_page)
 
     export_dir = dest_dir / f"Salvage {window.session.timestamp}" / "Photos and videos" / "2026"
     exported = sorted(p.name for p in export_dir.iterdir())

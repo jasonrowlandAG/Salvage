@@ -45,5 +45,21 @@ def export(
     destination: Path,
     on_progress: Callable[[int, int], None] | None = None,
     include_duplicates: bool = False,
-) -> list[Path]:
-    return export_found(items, destination, on_progress=on_progress, include_duplicates=include_duplicates)
+) -> tuple[list[Path], int]:
+    """Copies each item one at a time so a single unreadable file (e.g. an iCloud
+    placeholder whose download never completed) can't abort the whole export -
+    export_found() itself has no per-file error handling, and previously ran as one
+    batch call with nothing catching the FileNotFoundError it can raise mid-loop
+    (docs/ux-review.md finding 2.4). Returns (written_paths, failed_count).
+    """
+    written: list[Path] = []
+    failed = 0
+    total = len(items)
+    for i, item in enumerate(items, start=1):
+        try:
+            written.extend(export_found([item], destination, include_duplicates=include_duplicates))
+        except Exception:
+            failed += 1
+        if on_progress is not None:
+            on_progress(i, total)
+    return written, failed
