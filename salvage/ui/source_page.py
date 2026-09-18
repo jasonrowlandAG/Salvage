@@ -338,6 +338,11 @@ class SourcePage(QWidget):
             self.continue_btn.setEnabled(True)
         self.system_disk_warning.show()
 
+    def open_disk_image_dialog(self) -> None:
+        """Public entry point for the File > Open Disk Image... menu action - same
+        picker as the "Scan a disk image..." button below."""
+        self._pick_image()
+
     def _pick_image(self) -> None:
         path_str, _ = QFileDialog.getOpenFileName(self, "Choose a disk image")
         if not path_str:

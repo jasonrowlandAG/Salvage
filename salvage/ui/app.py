@@ -6,11 +6,13 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QProgressDialog, QStackedWidget
 
 from salvage.engine.ios import IOSDevice
 from salvage.engine.models import Device, RecoveredFile, ScanMode, ScanResult
 from salvage.ui import ios_facade, media_facade
+from salvage.ui.about import AboutDialog, LicencesDialog
 from salvage.ui.done_page import DonePage
 from salvage.ui.ios_backup_page import IOSBackupPage
 from salvage.ui.ios_options_page import IOSOptionsPage
@@ -93,8 +95,60 @@ class MainWindow(QMainWindow):
         ):
             self.stack.addWidget(page)
 
+        self._build_menu_bar()
+
         self.source_page.refresh()
         self.stack.setCurrentWidget(self.source_page)
+
+    def _build_menu_bar(self) -> None:
+        """Native application menu (docs/ux-review.md finding 7.1: previously zero
+        QMenuBar/QAction/QKeySequence anywhere - no Quit, no Close, no About, no
+        standard shortcuts on either platform). Qt relocates AboutRole/QuitRole
+        actions into the macOS application menu automatically regardless of which
+        QMenu they're added to; on Windows/Linux they stay put in that menu."""
+        menu_bar = self.menuBar()
+
+        file_menu = menu_bar.addMenu("&File")
+        open_image_action = QAction("Open Disk Image…", self)
+        open_image_action.setShortcut(QKeySequence("Ctrl+O"))
+        open_image_action.triggered.connect(self._open_disk_image_from_menu)
+        file_menu.addAction(open_image_action)
+        file_menu.addSeparator()
+        quit_action = QAction("Quit Salvage", self)
+        # Explicit "Ctrl+Q" text (Qt maps "Ctrl" to Cmd on macOS) rather than
+        # QKeySequence.StandardKey.Quit, whose resolved binding depends on the
+        # platform theme - confirmed empty under the offscreen QPA plugin used for
+        # tests, so relying on it would make the shortcut untestable and, worse,
+        # silently absent if that theme lookup ever fails on a real machine too.
+        quit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        quit_action.setMenuRole(QAction.MenuRole.QuitRole)
+        quit_action.triggered.connect(self.close)
+        file_menu.addAction(quit_action)
+
+        window_menu = menu_bar.addMenu("&Window")
+        close_action = QAction("Close", self)
+        close_action.setShortcut(QKeySequence("Ctrl+W"))
+        close_action.triggered.connect(self.close)
+        window_menu.addAction(close_action)
+
+        help_menu = menu_bar.addMenu("&Help")
+        about_action = QAction("About Salvage", self)
+        about_action.setMenuRole(QAction.MenuRole.AboutRole)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+        licences_action = QAction("Licences", self)
+        licences_action.triggered.connect(self._show_licences)
+        help_menu.addAction(licences_action)
+
+    def _open_disk_image_from_menu(self) -> None:
+        self.go_to_source()
+        self.source_page.open_disk_image_dialog()
+
+    def _show_about(self) -> None:
+        AboutDialog(self).exec()
+
+    def _show_licences(self) -> None:
+        LicencesDialog(self).exec()
 
     def go_to_source(self) -> None:
         self.stack.setCurrentWidget(self.source_page)

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from salvage.engine.ios import cleanup_stale_ios_caches
 from salvage.ui import engine_facade
+from salvage.ui.about import app_version
 from salvage.ui.app import MainWindow
 from salvage.ui.style import STYLESHEET
 
@@ -23,6 +26,11 @@ def main() -> None:
     fake = os.environ.get("SALVAGE_FAKE") == "1"
 
     app = QApplication(sys.argv)
+    app.setApplicationName("Salvage")
+    app.setApplicationDisplayName("Salvage")
+    app.setApplicationVersion(app_version())
+    app.setOrganizationName("Assembly Growth")
+    _set_window_icon(app)
     app.setStyleSheet(STYLESHEET)
 
     engine, _warning, needs_binary_dialog = engine_facade.make_engine(fake)
@@ -39,6 +47,22 @@ def main() -> None:
     window = MainWindow(fake, engine)
     window.show()
     sys.exit(app.exec())
+
+
+def _set_window_icon(app: QApplication) -> None:
+    """Best-effort app icon for the running window/taskbar - the .app bundle's own
+    Dock/Finder icon is already set via packaging/salvage.spec's BUNDLE(icon=...)
+    independently of this, so this only matters for running from source and for
+    Windows taskbar/alt-tab, where nothing else supplies one."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    candidates = [
+        Path(meipass) / "assets" / "icon_1024.png" if meipass else None,
+        Path(__file__).resolve().parent.parent / "packaging" / "assets" / "icon_1024.png",
+    ]
+    for path in candidates:
+        if path is not None and path.exists():
+            app.setWindowIcon(QIcon(str(path)))
+            return
 
 
 def _print_engine_info() -> None:
