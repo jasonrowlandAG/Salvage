@@ -566,6 +566,21 @@ class FilesystemEngine:
                     target.unlink(missing_ok=True)
                     continue
 
+                # icat can hand back whole allocated clusters for a file's $DATA
+                # attribute rather than truncating to its recorded logical size
+                # (cluster slack) -- verified on NTFS, where a deleted file's
+                # extracted bytes came back padded past its real content with
+                # trailing garbage from the cluster's previous contents. fls's own
+                # reported size is read directly from the filesystem's record of the
+                # file's actual length, so it's authoritative when present; truncate
+                # to it rather than let every downstream consumer (integrity
+                # verification, exact-byte comparisons, the file a user actually
+                # opens) see that trailing garbage as if it were real content.
+                if size > 0 and actual_size > size:
+                    with open(target, "r+b") as fh:
+                        fh.truncate(size)
+                    actual_size = size
+
                 new_entry = RecoveredFile(
                     path=target,
                     name=target.name,

@@ -279,6 +279,21 @@ def _find(files, name: str):
     return next((f for f in files if f.original_name == name), None)
 
 
+def _assert_bytes_equal(recovered: bytes, original: bytes, label: str) -> None:
+    """Byte-exact comparison with a diagnostic-rich failure message -- if recovered
+    content is longer than the original and starts with it, that's cluster slack
+    (icat handing back a whole allocated cluster rather than truncating to the
+    file's recorded logical size); anything else is a genuinely wrong recovery."""
+    if recovered == original:
+        return
+    raise AssertionError(
+        f"{label}: recovered {len(recovered)} bytes, original {len(original)} bytes "
+        f"(diff {len(recovered) - len(original)}); "
+        f"recovered.startswith(original)={recovered.startswith(original)}, "
+        f"original.startswith(recovered)={original.startswith(recovered)}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Diagnostic: raw `fls` output against real NTFS, not just FAT32/exFAT/HFS+
 # ---------------------------------------------------------------------------
@@ -337,13 +352,13 @@ def test_filesystem_engine_recovers_deleted_ntfs_files_byte_identical(tmp_path, 
     assert jpeg.original_dir == _JPEG_DIR
     assert jpeg.deleted is True
     assert jpeg.source_engine == "sleuthkit"
-    assert jpeg.path.read_bytes() == ntfs_volume["jpeg_bytes"]
+    _assert_bytes_equal(jpeg.path.read_bytes(), ntfs_volume["jpeg_bytes"], "jpeg")
 
     docx = _find(result.files, _DOCX_NAME)
     assert docx is not None
     assert docx.original_dir == _DOC_DIR
     assert docx.deleted is True
-    assert docx.path.read_bytes() == ntfs_volume["docx_bytes"]
+    _assert_bytes_equal(docx.path.read_bytes(), ntfs_volume["docx_bytes"], "docx")
 
     # The never-deleted pdf is correctly excluded from the default deleted-only scan.
     assert _find(result.files, _PDF_NAME) is None
@@ -357,7 +372,7 @@ def test_filesystem_engine_include_existing_finds_live_pdf(tmp_path, ntfs_volume
     pdf = _find(result.files, _PDF_NAME)
     assert pdf is not None
     assert pdf.deleted is False
-    assert pdf.path.read_bytes() == ntfs_volume["pdf_bytes"]
+    _assert_bytes_equal(pdf.path.read_bytes(), ntfs_volume["pdf_bytes"], "pdf")
 
 
 # ---------------------------------------------------------------------------
