@@ -375,7 +375,12 @@ def _read_box_header(f, end: int) -> tuple[int, bytes, int] | None:
     return size, box_type, header_len
 
 
-def _find_mvhd_bytes(f, start: int, end: int) -> bytes | None:
+_MAX_BOX_NESTING_DEPTH = 32  # real files never nest "moov" more than 1-2 deep; this only guards a hostile/corrupt one
+
+
+def _find_mvhd_bytes(f, start: int, end: int, _depth: int = 0) -> bytes | None:
+    if _depth > _MAX_BOX_NESTING_DEPTH:
+        return None
     pos = start
     while pos < end:
         f.seek(pos)
@@ -387,7 +392,7 @@ def _find_mvhd_bytes(f, start: int, end: int) -> bytes | None:
             f.seek(pos + header_len)
             return f.read(size - header_len)
         if box_type == b"moov":
-            found = _find_mvhd_bytes(f, pos + header_len, pos + size)
+            found = _find_mvhd_bytes(f, pos + header_len, pos + size, _depth + 1)
             if found is not None:
                 return found
         pos += size

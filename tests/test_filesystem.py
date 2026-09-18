@@ -254,3 +254,85 @@ def test_scan_no_filesystem_suggests_deep_scan(tmp_path):
     assert not result.cancelled
     assert result.error is not None
     assert "Deep scan" in result.error
+
+
+# ---------------------------------------------------------------------------
+# Hostile filenames: one bad name must not abort the whole scan, and the
+# sanitizer itself must produce names every target OS can actually write.
+# See docs/security-review.md finding #6.
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_component_caps_by_encoded_bytes_not_code_points(tmp_path):
+    from salvage.engine.filesystem import _MAX_COMPONENT_LEN, _sanitize_component
+
+    # 400 emoji is 400 *characters* but 1600 *bytes* -- the old code-point cap
+    # would let this sanitize to 200 characters = 800 bytes, well over the
+    # 255-byte NAME_MAX most filesystems enforce. Reproduced directly against
+    # the real sanitizer: `mkdir()` on the pre-fix output raised
+    # OSError(63, 'File name too long').
+    hostile = "\U0001f600" * 400
+    sanitized = _sanitize_component(hostile)
+    assert len(sanitized.encode("utf-8")) <= _MAX_COMPONENT_LEN
+    # Must still be writable: round-trips through a real mkdir without ENAMETOOLONG.
+    (tmp_path / sanitized).mkdir()
+
+
+@pytest.mark.parametrize(
+    "hostile,unwritable_stem",
+    [
+        ("CON", "CON"),
+        ("CON.txt", "CON"),
+        ("con.txt", "con"),  # case-insensitive
+        ("NUL", "NUL"),
+        ("COM1", "COM1"),
+        ("LPT1.jpg", "LPT1"),
+    ],
+)
+def test_sanitize_component_escapes_windows_reserved_device_names(hostile, unwritable_stem):
+    from salvage.engine.filesystem import _sanitize_component
+
+    sanitized = _sanitize_component(hostile)
+    # Must no longer collide with the reserved stem Windows refuses to create.
+    assert sanitized.split(".")[0].upper() != unwritable_stem.upper()
+
+
+@pytest.mark.parametrize("hostile", ["trailing dot.", "trailing dots..", "trailing space "])
+def test_sanitize_component_strips_trailing_dots_and_spaces(hostile):
+    from salvage.engine.filesystem import _sanitize_component
+
+    sanitized = _sanitize_component(hostile)
+    assert not sanitized.endswith(".")
+    assert not sanitized.endswith(" ")
+
+
+def test_hostile_file_failure_is_skipped_not_fatal(tmp_path, exfat_volume, monkeypatch):
+    """A single file whose extraction fails for whatever reason (ENAMETOOLONG,
+    a permission error, ...) must not discard every file already recovered in
+    the same scan -- it should be skipped and counted, and the scan should
+    still report success with everything else intact."""
+    from pathlib import Path as _Path
+
+    original_mkdir = _Path.mkdir
+
+    def hostile_mkdir(self, *args, **kwargs):
+        if "100APPLE" in str(self):
+            raise OSError(63, "File name too long")
+        return original_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(_Path, "mkdir", hostile_mkdir)
+
+    engine = FilesystemEngine()
+    result = engine.scan(exfat_volume["raw_path"], tmp_path, mode=ScanMode.QUICK)
+
+    assert result.success
+    assert not result.cancelled
+    assert result.skipped_files >= 1
+
+    # The JPEG lived under the directory whose mkdir was made to fail.
+    assert _find(result.files, _JPEG_NAME) is None
+    # The PDF, in a different directory, must still have been recovered --
+    # the whole scan's results must not have been discarded.
+    pdf = _find(result.files, _PDF_NAME)
+    assert pdf is not None
+    assert pdf.path.read_bytes() == exfat_volume["pdf_bytes"]

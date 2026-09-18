@@ -96,3 +96,4 @@ class ScanResult:
     log_text: str = ""
     error: str | None = None
     cancelled: bool = False
+    skipped_files: int = 0  # files whose extraction failed (e.g. a hostile name) and were skipped, not fatal

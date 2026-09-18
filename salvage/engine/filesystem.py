@@ -50,7 +50,7 @@ _TOOL_NAMES = ("fls", "icat", "fsstat", "mmls")
 _PROGRESS_INTERVAL = 0.2  # ~5/sec, matches PhotoRecEngine
 _TSK_TIMEOUT = 120  # seconds; per-subprocess-call ceiling for a hung/damaged volume
 _ICAT_TIMEOUT = 120
-_MAX_COMPONENT_LEN = 200
+_MAX_COMPONENT_LEN = 200  # bytes (encoded UTF-8), not code points -- see _truncate_utf8
 _OUTPUT_DIR_NAME = "recovered"
 
 
@@ -207,6 +207,24 @@ _FLS_LINE_RE = re.compile(
 )
 _DELETED_SUFFIX_RE = re.compile(r"\s*\(deleted[^)]*\)\s*$")
 _UNSAFE_CHARS_RE = re.compile(r'[<>:"|?*\\/\x00-\x1f]')
+# Windows reserves these base names (case-insensitively, regardless of extension)
+# for device I/O -- a recovered file named e.g. "CON" or "COM1.txt" can't be
+# created on Windows, which Salvage ships for.
+_RESERVED_NAME_RE = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)", re.IGNORECASE)
+
+
+def _truncate_utf8(name: str, max_bytes: int) -> str:
+    """Truncate to at most `max_bytes` *encoded* UTF-8 bytes, not code points --
+    NAME_MAX on most filesystems is a byte limit, and a code-point cap lets a
+    string of multi-byte characters (e.g. emoji) sanitize to something that
+    still blows past it (200 emoji = 200 chars but 800 bytes)."""
+    encoded = name.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return name
+    encoded = encoded[:max_bytes]
+    while encoded and (encoded[-1] & 0xC0) == 0x80:  # mid-sequence continuation byte
+        encoded = encoded[:-1]
+    return encoded.decode("utf-8", errors="ignore")
 
 
 def _sanitize_component(name: str) -> str:
@@ -214,7 +232,13 @@ def _sanitize_component(name: str) -> str:
     if name in ("", ".", ".."):
         return "_"
     name = _UNSAFE_CHARS_RE.sub("_", name)
-    return name[:_MAX_COMPONENT_LEN] or "_"
+    name = _truncate_utf8(name, _MAX_COMPONENT_LEN)
+    # Windows can't create a file whose name ends in a dot or space.
+    name = name.rstrip(". ") or "_"
+    # Windows reserves these device names regardless of extension.
+    if _RESERVED_NAME_RE.match(name):
+        name = "_" + name
+    return name or "_"
 
 
 def _sanitize_relpath(original_dir: str, original_name: str) -> Path:
@@ -439,6 +463,7 @@ class FilesystemEngine:
         start_time = time.monotonic()
         last_emit = 0.0
         cancelled = False
+        skipped_files = 0
 
         def emit(phase: str) -> None:
             nonlocal last_emit
@@ -526,71 +551,79 @@ class FilesystemEngine:
                 if not inode:
                     continue
 
-                rel_path = _sanitize_relpath(original_dir, original_name)
-                target = _unique_target(recovered_root / rel_path)
-                target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    rel_path = _sanitize_relpath(original_dir, original_name)
+                    target = _unique_target(recovered_root / rel_path)
+                    target.parent.mkdir(parents=True, exist_ok=True)
 
-                icat_args = [str(self.binaries["icat"]), "-o", str(vol.offset)]
-                if vol.fstype:
-                    icat_args += ["-f", vol.fstype]
-                icat_args += [source, inode]
+                    icat_args = [str(self.binaries["icat"]), "-o", str(vol.offset)]
+                    if vol.fstype:
+                        icat_args += ["-f", vol.fstype]
+                    icat_args += [source, inode]
 
-                extracted = _extract_file(icat_args, target, cancel, _ICAT_TIMEOUT)
-                if extracted is None:
-                    cancelled = True
-                    break
-                if not extracted:
-                    continue  # icat failed for this one file; skip it, scan continues
+                    extracted = _extract_file(icat_args, target, cancel, _ICAT_TIMEOUT)
+                    if extracted is None:
+                        cancelled = True
+                        break
+                    if not extracted:
+                        continue  # icat failed for this one file; skip it, scan continues
 
-                actual_size = target.stat().st_size if target.exists() else 0
-                if actual_size == 0:
-                    target.unlink(missing_ok=True)
-                    continue
-
-                new_entry = RecoveredFile(
-                    path=target,
-                    name=target.name,
-                    ext=ext,
-                    size=actual_size,
-                    category=category_for(ext),
-                    original_name=original_name,
-                    original_dir=original_dir,
-                    modified=_timestamp(m.group("mtime")),
-                    created=_timestamp(m.group("crtime")) or _timestamp(m.group("ctime")),
-                    deleted=deleted,
-                    inode=inode,
-                    source_engine="sleuthkit",
-                    integrity=Integrity.INTACT if actual_size == size else Integrity.PARTIAL,
-                )
-
-                # A rename/move (e.g. a file dragged to the Trash) leaves the file's
-                # *old* directory entry behind as a second deleted record pointing at
-                # the same data -- fls reports both, and both extract identical bytes
-                # via icat. Same content, two inodes: dedupe by content hash so it's
-                # reported once, keeping whichever record was found *later* in this
-                # scan. In practice that's the more recent dirent (a directory added
-                # after the scan's earlier ones, e.g. .Trashes, is walked after the
-                # directories that already existed) -- i.e. the file's last known
-                # location, which is what a user actually wants reported for
-                # something they deleted from the Trash. The tradeoff: FAT/exFAT
-                # rewrite mtime on rename, so the surviving record's mtime reflects
-                # the move, not the file's true original modified time -- documented
-                # in bench/README.md rather than silently "fixed" by guessing.
-                digest = _sha256_file(target)
-                if digest is not None:
-                    prior_index = content_seen.get(digest)
-                    if prior_index is not None:
-                        prior = files[prior_index]
-                        if prior.path != target:
-                            prior.path.unlink(missing_ok=True)
-                        files[prior_index] = new_entry
-                        content_seen[digest] = prior_index
-                        emit(phase)
+                    actual_size = target.stat().st_size if target.exists() else 0
+                    if actual_size == 0:
+                        target.unlink(missing_ok=True)
                         continue
-                    content_seen[digest] = len(files)
 
-                files.append(new_entry)
-                emit(phase)
+                    new_entry = RecoveredFile(
+                        path=target,
+                        name=target.name,
+                        ext=ext,
+                        size=actual_size,
+                        category=category_for(ext),
+                        original_name=original_name,
+                        original_dir=original_dir,
+                        modified=_timestamp(m.group("mtime")),
+                        created=_timestamp(m.group("crtime")) or _timestamp(m.group("ctime")),
+                        deleted=deleted,
+                        inode=inode,
+                        source_engine="sleuthkit",
+                        integrity=Integrity.INTACT if actual_size == size else Integrity.PARTIAL,
+                    )
+
+                    # A rename/move (e.g. a file dragged to the Trash) leaves the file's
+                    # *old* directory entry behind as a second deleted record pointing at
+                    # the same data -- fls reports both, and both extract identical bytes
+                    # via icat. Same content, two inodes: dedupe by content hash so it's
+                    # reported once, keeping whichever record was found *later* in this
+                    # scan. In practice that's the more recent dirent (a directory added
+                    # after the scan's earlier ones, e.g. .Trashes, is walked after the
+                    # directories that already existed) -- i.e. the file's last known
+                    # location, which is what a user actually wants reported for
+                    # something they deleted from the Trash. The tradeoff: FAT/exFAT
+                    # rewrite mtime on rename, so the surviving record's mtime reflects
+                    # the move, not the file's true original modified time -- documented
+                    # in bench/README.md rather than silently "fixed" by guessing.
+                    digest = _sha256_file(target)
+                    if digest is not None:
+                        prior_index = content_seen.get(digest)
+                        if prior_index is not None:
+                            prior = files[prior_index]
+                            if prior.path != target:
+                                prior.path.unlink(missing_ok=True)
+                            files[prior_index] = new_entry
+                            content_seen[digest] = prior_index
+                            emit(phase)
+                            continue
+                        content_seen[digest] = len(files)
+
+                    files.append(new_entry)
+                    emit(phase)
+                except OSError:
+                    # A single hostile/unwritable name (ENAMETOOLONG, a reserved
+                    # device name, a permission error, ...) must not take down the
+                    # whole scan and discard every file already recovered -- skip
+                    # just this one and keep going.
+                    skipped_files += 1
+                    continue
 
             if cancelled:
                 break
@@ -603,6 +636,7 @@ class FilesystemEngine:
             files=files,
             output_dirs=[recovered_root] if files else [],
             cancelled=cancelled,
+            skipped_files=skipped_files,
         )
 
     # -- privileged path: raw device access needs root on macOS/Linux --
@@ -682,6 +716,7 @@ class FilesystemEngine:
         return ScanResult(
             success=manifest.get("success", False),
             files=files,
+            skipped_files=manifest.get("skipped_files", 0),
             output_dirs=[workdir / _OUTPUT_DIR_NAME] if files else [],
             cancelled=manifest.get("cancelled", False),
         )
@@ -722,6 +757,7 @@ def _root_worker_main(argv: list[str]) -> None:
         "success": result.success,
         "error": result.error,
         "cancelled": result.cancelled,
+        "skipped_files": result.skipped_files,
         "files": [
             {
                 "rel_path": str(f.path.relative_to(workdir)),

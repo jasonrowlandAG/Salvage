@@ -121,6 +121,7 @@ class IOSBackupWorker(QThread):
 class MediaScanWorker(QThread):
     progress = Signal(object)   # local_media.ScanStats
     finished_scan = Signal(object)  # list[FoundMedia]
+    failed = Signal(str)
 
     def __init__(self, fake: bool, sources, min_size: int, hash_dupes: bool, parent=None) -> None:
         super().__init__(parent)
@@ -133,15 +134,51 @@ class MediaScanWorker(QThread):
     def run(self) -> None:
         from salvage.ui import media_facade
 
-        found = media_facade.scan(
-            self._fake,
-            self._sources,
-            self._min_size,
-            self._hash_dupes,
-            on_progress=lambda s: self.progress.emit(s),
-            cancel=self.cancel_event,
-        )
+        try:
+            found = media_facade.scan(
+                self._fake,
+                self._sources,
+                self._min_size,
+                self._hash_dupes,
+                on_progress=lambda s: self.progress.emit(s),
+                cancel=self.cancel_event,
+            )
+        except Exception as exc:
+            # An unexpected exception here (e.g. a hostile file the scan walked
+            # into) must not kill the QThread silently -- every sibling worker
+            # in this module already guards its run() body; this one didn't.
+            # Emit both: `failed` for a caller that wants the error message,
+            # and `finished_scan([])` so a caller only listening for
+            # completion (the current media scan page) isn't left waiting on
+            # a signal that would otherwise never come.
+            self.failed.emit(str(exc))
+            self.finished_scan.emit([])
+            return
         self.finished_scan.emit(found)
+
+
+class MediaExportWorker(QThread):
+    """Runs media_facade.export() off the UI thread - previously export_media_results()
+    called it synchronously from a button click, so a slow copy or a large batch froze
+    the whole app with no progress feedback (docs/ux-review.md finding 2.4)."""
+
+    progress = Signal(int, int)
+    finished_export = Signal(object, int)  # list[Path] written, failed count
+
+    def __init__(self, items, destination: Path, parent=None) -> None:
+        super().__init__(parent)
+        self._items = items
+        self._destination = destination
+
+    def run(self) -> None:
+        from salvage.ui import media_facade
+
+        written, failed = media_facade.export(
+            self._items,
+            self._destination,
+            on_progress=lambda done, total: self.progress.emit(done, total),
+        )
+        self.finished_export.emit(written, failed)
 
 
 class IOSParseWorker(QThread):

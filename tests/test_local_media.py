@@ -108,6 +108,22 @@ def test_mvhd_creation_time_none_for_garbage(tmp_path):
     assert lm._mvhd_creation_time(junk) is None
 
 
+def test_mvhd_creation_time_bounds_deeply_nested_moov_boxes(tmp_path):
+    # A hostile/corrupt .mov can nest "moov" boxes indefinitely. Before the
+    # fix, _find_mvhd_bytes recursed once per nesting level with no depth
+    # limit -- a ~32 KB file with 4,000 nested "moov" headers reliably raised
+    # an uncaught RecursionError (a RuntimeError subclass that
+    # _mvhd_creation_time's own `except (OSError, OverflowError, ValueError)`
+    # does not catch), which propagated straight out of the media scan.
+    nested = b""
+    for _ in range(4000):
+        nested = _box(b"moov", nested)
+    hostile = tmp_path / "hostile.mov"
+    hostile.write_bytes(nested)
+
+    assert lm._mvhd_creation_time(hostile) is None
+
+
 # ---------------------------------------------------------------------------
 # scan_sources: generic folder walking, skip rules, dedup, min_size
 # ---------------------------------------------------------------------------
