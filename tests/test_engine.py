@@ -109,3 +109,36 @@ def test_build_cmd_never_emits_unknown_toggles():
                                              "fileopt", "everything", "disable", "enable", "search"}
     assert emitted == {"jpg", "mov", "riff", "doc", "txt"}
     assert not (emitted & set(_TOGGLE_BY_EXT)), "raw extensions must be mapped away"
+
+
+# ---------------------------------------------------------------------------
+# Binary resolution order: bundled -> fixed system locations -> PATH last.
+# See docs/security-review.md finding #4.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_binary_never_reports_a_bare_path_match_when_a_fixed_dir_has_it():
+    # On this dev machine there's no bundled copy, but /opt/homebrew/bin/photorec (a
+    # fixed, known-good location) does exist - resolution must report that as the
+    # source, not PATH, even though `shutil.which("photorec")` would also find it.
+    path, from_path = PhotoRecEngine._resolve_binary()
+    assert path is not None
+    assert from_path is False
+
+
+def test_scan_refuses_elevation_for_untrusted_path_resolved_binary(tmp_path, monkeypatch):
+    # A binary that was only found via PATH (not our bundled copy, not a fixed system
+    # location) and isn't root-owned/non-writable must never be handed to
+    # run_privileged() - see require_safe_for_elevation(). Simulate exactly that by
+    # forcing resolution to report a hostile, user-writable "PATH match".
+    hostile = tmp_path / "photorec"
+    hostile.write_text("planted by an unprivileged attacker")
+
+    monkeypatch.setattr(PhotoRecEngine, "_resolve_binary", staticmethod(lambda: (hostile, True)))
+    engine = PhotoRecEngine()
+    assert engine._binary_from_path is True
+
+    result = engine.scan("/dev/rdisk999fake", tmp_path / "work", ScanMode.DEEP)
+
+    assert result.success is False
+    assert "Refusing" in (result.error or "")

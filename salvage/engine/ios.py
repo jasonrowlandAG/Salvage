@@ -16,6 +16,8 @@ from typing import Callable
 
 from Crypto.Cipher import AES
 
+from salvage.engine.privileged import resolve_trusted_binary
+
 try:
     import pty  # POSIX only
 except ImportError:
@@ -29,18 +31,14 @@ _CANDIDATE_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin")
 
 
 def _tool(name: str) -> str:
-    which = shutil.which(name)
-    if which:
-        return which
-    for base in _CANDIDATE_DIRS:
-        candidate = Path(base) / name
-        if candidate.exists():
-            return str(candidate)
-    # Bundled path, same layout as PhotoRecEngine.locate_binary() (macOS only for now).
-    bundled = Path(__file__).resolve().parent.parent / "bin" / "macos" / name
-    if bundled.exists():
-        return str(bundled)
-    return name  # subprocess will raise FileNotFoundError with a clear message
+    # Bundled copy and fixed/known system locations first, PATH only as a last resort -
+    # see privileged.resolve_trusted_binary(). These libimobiledevice tools aren't run
+    # elevated today, but resolving this way still avoids the same packaging trap
+    # PhotoRec had (a frozen build silently preferring Homebrew's copy over its own),
+    # and keeps this module consistent with the other two binary-resolution sites.
+    bundled = Path(__file__).resolve().parent.parent / "bin" / "macos" / name  # macOS only for now
+    path, _from_path = resolve_trusted_binary(name, bundled, tuple(Path(d) for d in _CANDIDATE_DIRS))
+    return str(path) if path is not None else name  # subprocess will raise FileNotFoundError with a clear message
 
 
 def _run(args: list[str], timeout: float = 20) -> subprocess.CompletedProcess:

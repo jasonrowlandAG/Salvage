@@ -44,7 +44,7 @@ from salvage.engine.models import (
     ScanResult,
     category_for,
 )
-from salvage.engine.privileged import run_privileged
+from salvage.engine.privileged import require_safe_for_elevation, resolve_trusted_binary, run_privileged
 
 _TOOL_NAMES = ("fls", "icat", "fsstat", "mmls")
 _PROGRESS_INTERVAL = 0.2  # ~5/sec, matches PhotoRecEngine
@@ -365,29 +365,30 @@ class FilesystemEngine:
 
     @staticmethod
     def locate_binaries() -> dict[str, Path] | None:
+        found = FilesystemEngine._locate_binaries_with_source()
+        if found is None:
+            return None
+        return {name: path for name, (path, _from_path) in found.items()}
+
+    @staticmethod
+    def _locate_binaries_with_source() -> dict[str, tuple[Path, bool]] | None:
+        """Like locate_binaries(), but also reports whether each tool was only
+        found via PATH - the root-worker (already-elevated) entry point needs
+        that to decide whether require_safe_for_elevation() should run."""
         system = platform.system()
         exe_suffix = ".exe" if system == "Windows" else ""
         plat_dir = "macos" if system == "Darwin" else ("windows" if system == "Windows" else "linux")
         bundled_dir = Path(__file__).resolve().parent.parent / "bin" / plat_dir
-        search_dirs = [Path("/opt/homebrew/bin"), Path("/usr/local/bin"), Path("/usr/bin")]
+        search_dirs = (Path("/opt/homebrew/bin"), Path("/usr/local/bin"), Path("/usr/bin"))
 
-        found: dict[str, Path] = {}
+        found: dict[str, tuple[Path, bool]] = {}
         for name in _TOOL_NAMES:
-            which = shutil.which(name)
-            path: Path | None = Path(which) if which else None
-            if path is None:
-                for d in search_dirs:
-                    candidate = d / f"{name}{exe_suffix}"
-                    if candidate.exists():
-                        path = candidate
-                        break
-            if path is None:
-                candidate = bundled_dir / f"{name}{exe_suffix}"
-                if candidate.exists():
-                    path = candidate
+            filename = f"{name}{exe_suffix}"
+            bundled = bundled_dir / filename
+            path, from_path = resolve_trusted_binary(filename, bundled, search_dirs)
             if path is None:
                 return None
-            found[name] = path
+            found[name] = (path, from_path)
         return found
 
     @staticmethod
@@ -745,11 +746,23 @@ def _root_worker_main(argv: list[str]) -> None:
     manifest_path = workdir / "fs_manifest.json"
     extensions = [e for e in args.extensions.split(",") if e] or None
 
-    binaries = FilesystemEngine.locate_binaries()
-    if binaries is None:
+    found = FilesystemEngine._locate_binaries_with_source()
+    if found is None:
         manifest_path.write_text(json.dumps({"error": "Sleuth Kit tools not found on this system."}))
         return
 
+    # This process is already running as root (via run_privileged) - a PATH-resolved
+    # tool must still pass the same ownership check a not-yet-elevated caller would
+    # need, as a backstop in case the launcher's PATH sanitisation (relied on today,
+    # see docs/security-review.md finding #4) ever changes.
+    try:
+        for path, from_path in found.values():
+            require_safe_for_elevation(path, from_path)
+    except PermissionError as exc:
+        manifest_path.write_text(json.dumps({"error": str(exc)}))
+        return
+
+    binaries = {name: path for name, (path, _from_path) in found.items()}
     engine = FilesystemEngine(binaries)
     result = engine._scan_impl(args.source, workdir, extensions, None, None, args.include_existing)
 

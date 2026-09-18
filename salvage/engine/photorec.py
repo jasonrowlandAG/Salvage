@@ -18,7 +18,12 @@ except ImportError:
     pty = None  # type: ignore[assignment]
 
 from salvage.engine.models import ScanMode, ScanProgress, ScanResult
-from salvage.engine.privileged import PrivilegedProcess, run_privileged
+from salvage.engine.privileged import (
+    PrivilegedProcess,
+    require_safe_for_elevation,
+    resolve_trusted_binary,
+    run_privileged,
+)
 from salvage.engine.results import collect_recovered, find_output_dirs
 
 # Live status line, e.g. "Pass 1 - Reading sector    12345/65536, " or the
@@ -97,37 +102,48 @@ _OUTPUT_BASE = "recovered"
 
 class PhotoRecEngine:
     def __init__(self, binary: Path | None = None) -> None:
-        located = binary if binary is not None else self.locate_binary()
+        if binary is not None:
+            located, from_path = Path(binary), False
+        else:
+            located, from_path = self._resolve_binary()
         if located is None:
             raise FileNotFoundError("photorec binary not found; install testdisk or pass an explicit path")
-        self.binary = Path(located)
+        self.binary = located
+        # Only matters for a privilege-elevated scan (see scan(), require_safe_for_elevation) -
+        # a caller-supplied `binary` is always trusted, same as before this fix.
+        self._binary_from_path = from_path
 
     @staticmethod
     def locate_binary() -> Path | None:
-        which = shutil.which("photorec")
-        if which:
-            return Path(which)
+        return PhotoRecEngine._resolve_binary()[0]
 
+    @staticmethod
+    def _resolve_binary() -> tuple[Path | None, bool]:
+        # Bundled copy and fixed/known system locations first (in that order), PATH
+        # only as a last resort - see privileged.resolve_trusted_binary(). Preferring
+        # our own bundled binary also fixes a packaging bug: a frozen build must not
+        # prefer Homebrew's photorec over the copy it ships and was tested against.
         system = platform.system()
-        candidates: list[Path] = []
         if system == "Windows":
-            for base in glob.glob(r"C:\Program Files\testdisk*"):
-                candidates.append(Path(base) / "photorec_win.exe")
+            fixed = tuple(Path(base) / "photorec_win.exe" for base in glob.glob(r"C:\Program Files\testdisk*"))
             bundled = Path(__file__).resolve().parent.parent / "bin" / "windows" / "photorec_win.exe"
         else:
-            candidates += [
-                Path("/opt/homebrew/bin/photorec"),
-                Path("/usr/local/bin/photorec"),
-                Path("/usr/bin/photorec"),
-            ]
+            fixed = (
+                Path("/opt/homebrew/bin"),
+                Path("/usr/local/bin"),
+                Path("/usr/bin"),
+            )
             plat_dir = "macos" if system == "Darwin" else "linux"
             bundled = Path(__file__).resolve().parent.parent / "bin" / plat_dir / "photorec"
-        candidates.append(bundled)
+            return resolve_trusted_binary("photorec", bundled, fixed)
 
-        for c in candidates:
+        if bundled.exists():
+            return bundled, False
+        for c in fixed:
             if c.exists():
-                return c
-        return None
+                return c, False
+        which = shutil.which("photorec")
+        return (Path(which), True) if which else (None, False)
 
     def scan(
         self,
@@ -167,6 +183,7 @@ class PhotoRecEngine:
 
         if needs_privilege:
             try:
+                require_safe_for_elevation(self.binary, self._binary_from_path)
                 priv_proc = run_privileged(args, workdir, linux=platform.system() == "Linux")
             except PermissionError as exc:
                 return ScanResult(success=False, error=str(exc))

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
+import stat
 import subprocess
 import time
 import uuid
@@ -26,6 +28,67 @@ _PID_NAME = "photorec.pid"
 _CANCEL_NAME = "cancel"
 _DONE_NAME = "done"
 _SES_NAME = "photorec.ses"
+
+
+# ---------------------------------------------------------------------------
+# Trusted binary resolution: shared by photorec.py, filesystem.py and ios.py.
+#
+# `shutil.which()` searches the *unprivileged* process's own PATH, which a
+# local attacker with ordinary user-level code execution can influence (a
+# writable directory ahead of the trusted ones - common for developers:
+# ~/.cargo/bin, ~/go/bin, nvm/pyenv/rbenv shims). If the tool that resolution
+# picks is then run through run_privileged() (elevated to root), that's a
+# straight path from "planted a file on PATH" to "ran it as root". Resolving
+# our own bundled copy and known fixed system locations first, and only
+# falling back to PATH as a last resort, closes most of that off; the
+# require_safe_for_elevation() check below is the backstop for the case
+# where a PATH match is still the only thing found and the caller is about
+# to run it elevated.
+# ---------------------------------------------------------------------------
+
+
+def resolve_trusted_binary(
+    name: str, bundled: Path | None, fixed_dirs: tuple[Path, ...]
+) -> tuple[Path | None, bool]:
+    """Resolve `name`, preferring our own bundled copy, then a fixed/known system
+    location, and only falling back to PATH (`shutil.which`) last. Returns
+    (path, from_path); `from_path` is True only when nothing but a PATH match
+    was found, which is what require_safe_for_elevation() needs to know."""
+    if bundled is not None and bundled.exists():
+        return bundled, False
+    for base in fixed_dirs:
+        candidate = base / name
+        if candidate.exists():
+            return candidate, False
+    which = shutil.which(name)
+    if which:
+        return Path(which), True
+    return None, False
+
+
+def require_safe_for_elevation(path: Path, from_path: bool) -> None:
+    """Raise PermissionError if `path` must not be run with administrator
+    privileges. A binary we resolved ourselves (bundled or a fixed location) is
+    always fine. A binary that was only found via PATH is fine *only* if it's
+    root-owned and not writable by anyone else - otherwise the PATH that
+    produced it could have been influenced by an unprivileged local attacker,
+    and running it as root would hand them a privilege escalation."""
+    if not from_path:
+        return
+    if os.name == "nt":
+        # No POSIX ownership/mode bits to check, and run_privileged() here is
+        # POSIX-only (macOS osascript / Linux pkexec) - nothing to enforce yet.
+        return
+    try:
+        st = path.stat()
+    except OSError as exc:
+        raise PermissionError(f"Could not verify '{path}' before running it as root: {exc}") from exc
+    if st.st_uid != 0 or (st.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+        raise PermissionError(
+            f"Refusing to run '{path}' with administrator privileges: it was found on PATH "
+            "rather than a trusted location, and is not a root-owned, non-writable file. "
+            "Install it in a standard location (e.g. via Homebrew) or reinstall Salvage."
+        )
 
 
 def build_helper_script(photorec_args: list[str], workdir: str | Path, uid: int, gid: int, linux: bool = False) -> str:
