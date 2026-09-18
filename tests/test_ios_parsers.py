@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import sqlite3
+import struct
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -147,6 +150,60 @@ def test_recover_records_finds_deleted_message_reclaimed_into_gap(tmp_path):
 
     recovered = recover_records(db, "message", min_match=0.7)
     assert len(recovered) >= 1
+
+
+def test_recover_records_bounds_hostile_page_count_in_sparse_file(tmp_path):
+    # A hostile/corrupt SQLite header can declare a page_count far beyond
+    # what real data the file holds. Before the fix, recover_records() would
+    # iterate `range(1, page_count + 1)` unconditionally - a sparse file made
+    # *apparently* consistent with a huge page_count (a few KB actually on
+    # disk, tens of GB of logical/apparent size, exactly as someone else's
+    # corrupt or crafted iPhone backup could look) drove an effectively
+    # uncancellable, multi-second-to-multi-minute scan with no work cap.
+    # It must now bound its own work and return promptly regardless.
+    db = _make_db(tmp_path, "sms.db", _MESSAGE_SCHEMA)
+    conn = sqlite3.connect(db)
+    _insert_messages(conn, 5)
+    conn.commit()
+    conn.close()
+
+    hostile_page_count = 12_000_000  # ~46 GB logical size if trusted outright
+
+    with open(db, "r+b") as f:
+        header = bytearray(f.read(100))
+        page_size = struct.unpack(">H", bytes(header[16:18]))[0]
+        if page_size == 1:
+            page_size = 65536
+        header[28:32] = struct.pack(">I", hostile_page_count)
+        f.seek(0)
+        f.write(header)
+        # Sparse-extend so the file's *apparent* size matches the hostile
+        # claim (this writes ~1 byte to disk, not tens of GB).
+        f.seek(page_size * hostile_page_count - 1)
+        f.write(b"\x00")
+
+    start = time.monotonic()
+    recovered = recover_records(db, "message", min_match=0.7)
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 5.0, f"recover_records() took {elapsed:.1f}s against a hostile page_count"
+    assert isinstance(recovered, list)
+
+
+def test_recover_records_honours_cancel_event(tmp_path):
+    db = _make_db(tmp_path, "sms.db", _MESSAGE_SCHEMA)
+    conn = sqlite3.connect(db)
+    _insert_messages(conn, 60)
+    conn.commit()
+    conn.execute("DELETE FROM message WHERE ROWID = (SELECT MAX(ROWID) FROM message)")
+    conn.commit()
+    conn.close()
+
+    cancel = threading.Event()
+    cancel.set()  # already cancelled before the scan starts
+
+    recovered = recover_records(db, "message", min_match=0.7, cancel=cancel)
+    assert recovered == []
 
 
 def test_parse_messages_marks_recently_deleted_from_recoverable_join(tmp_path):

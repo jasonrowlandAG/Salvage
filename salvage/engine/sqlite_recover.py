@@ -33,10 +33,18 @@ from __future__ import annotations
 
 import sqlite3
 import struct
+import threading
 from pathlib import Path
 
 _HEADER_SIZE = 100
 _MAX_ROWID = 2**63 - 1
+_VALID_PAGE_SIZES = {512, 1024, 2048, 4096, 8192, 16384, 32768, 65536}
+# Hard ceiling on how many pages a single recover_records() call will ever
+# examine, regardless of what the header (or the file's apparent size, which
+# a sparse file can lie about just as easily) claims. At the measured cost of
+# roughly 1us/page this bounds worst-case runtime to a couple of seconds even
+# against a hostile header - see docs/security-review.md finding #3.
+_MAX_PAGE_SCAN_BUDGET = 200_000
 
 _SERIAL_FIXED_SIZE = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 6, 6: 8, 7: 8, 8: 0, 9: 0}
 
@@ -170,6 +178,8 @@ def _read_layout(f) -> tuple[int, int, int]:
     page_size = struct.unpack(">H", header[16:18])[0]
     if page_size == 1:
         page_size = 65536
+    if page_size not in _VALID_PAGE_SIZES:
+        raise ValueError(f"invalid SQLite page size in header: {page_size}")
     page_count = struct.unpack(">I", header[28:32])[0]
     first_trunk = struct.unpack(">I", header[32:36])[0]
     return page_size, page_count, first_trunk
@@ -220,7 +230,12 @@ def _score(values: list, families: list[str]) -> float:
     return matched / considered
 
 
-def recover_records(db: Path, table: str, min_match: float = 0.8) -> list[tuple]:
+def recover_records(
+    db: Path,
+    table: str,
+    min_match: float = 0.8,
+    cancel: threading.Event | None = None,
+) -> list[tuple]:
     """Scan `db` for deleted rows that look like they belonged to `table`.
 
     Uses the table's *current* schema (PRAGMA table_info) purely to score
@@ -228,6 +243,14 @@ def recover_records(db: Path, table: str, min_match: float = 0.8) -> list[tuple]
     assumed to still exist anywhere in the live schema. Returns column-value
     tuples aligned to that schema (shorter records are right-padded with
     None, matching SQLite's own "missing trailing columns are NULL" rule).
+
+    `db`'s own header `page_count` field is attacker-controlled (this walks a
+    file that may come from someone else's backup) and is never trusted on
+    its own: it's clamped against the file's actual size and against a hard
+    overall page-scan budget, so a hostile header can't turn this into an
+    effectively-uncancellable multi-minute loop. `cancel`, if given, is
+    polled periodically and stops the scan (returning whatever was found so
+    far) as soon as it's set.
     """
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
@@ -240,14 +263,28 @@ def recover_records(db: Path, table: str, min_match: float = 0.8) -> list[tuple]
     ncols = len(families)
 
     candidates: list[tuple[int, list]] = []
+    pages_scanned = 0
     with open(db, "rb") as f:
-        page_size, page_count, first_trunk = _read_layout(f)
+        page_size, header_page_count, first_trunk = _read_layout(f)
+        f.seek(0, 2)
+        file_size = f.tell()
+        # A hostile header can claim far more pages than the file could ever
+        # hold (or, via a sparse file, than were ever actually written) -
+        # clamp to what the file's real size could support and to the hard
+        # work budget before trusting it for iteration.
+        max_pages_by_size = max(0, file_size // page_size)
+        page_count = min(header_page_count, max_pages_by_size, _MAX_PAGE_SCAN_BUDGET)
         store = _PageStore(f, page_size, page_count)
 
         for page_no in range(1, page_count + 1):
+            if pages_scanned >= _MAX_PAGE_SCAN_BUDGET:
+                break
+            if cancel is not None and cancel.is_set():
+                return []
+            pages_scanned += 1
             page = store.read(page_no)
             if len(page) < page_size:
-                continue
+                continue  # past real EOF (sparse hole / truncated file) - nothing here
             header_off = _HEADER_SIZE if page_no == 1 else 0
             for start, end in _leaf_scan_regions(page, page_size, header_off):
                 _scan_page_for_candidates(page, page_size, start, end, candidates)
@@ -255,12 +292,21 @@ def recover_records(db: Path, table: str, min_match: float = 0.8) -> list[tuple]
         trunk = first_trunk
         visited: set[int] = set()
         while trunk and trunk not in visited and 1 <= trunk <= page_count:
+            if pages_scanned >= _MAX_PAGE_SCAN_BUDGET:
+                break
+            if cancel is not None and cancel.is_set():
+                return []
             visited.add(trunk)
+            pages_scanned += 1
             tpage = store.read(trunk)
             if len(tpage) < 8:
                 break
             next_trunk, leaf_count = struct.unpack(">II", tpage[0:8])
             for i in range(leaf_count):
+                if pages_scanned >= _MAX_PAGE_SCAN_BUDGET:
+                    break
+                if cancel is not None and cancel.is_set():
+                    return []
                 off = 8 + i * 4
                 if off + 4 > len(tpage):
                     break
@@ -268,6 +314,7 @@ def recover_records(db: Path, table: str, min_match: float = 0.8) -> list[tuple]
                 if not (1 <= leaf_no <= page_count):
                     continue
                 leaf = store.read(leaf_no)
+                pages_scanned += 1
                 # Freelist leaf pages carry no page-type byte of their own —
                 # whatever table they last held, their whole body is fair game.
                 _scan_page_for_candidates(leaf, page_size, 0, len(leaf), candidates)
