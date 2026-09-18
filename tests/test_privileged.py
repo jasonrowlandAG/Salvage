@@ -3,7 +3,7 @@ from __future__ import annotations
 import shlex
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -29,7 +29,11 @@ def test_helper_script_quotes_paths_with_spaces_and_apostrophes():
     inner = tokens[11]
 
     # The apostrophe in the path must be escaped correctly for nested single-quoting.
-    assert shlex.quote(str(workdir / "photorec.out")) in inner
+    # build_helper_script always renders POSIX (forward-slash) paths regardless of
+    # host OS (see its own PurePosixPath use) -- compute the expected value the same
+    # way, rather than via plain Path, which renders backslashes on a Windows host.
+    expected_out_path = str(PurePosixPath(str(workdir)) / "photorec.out")
+    assert shlex.quote(expected_out_path) in inner
 
     # The whole inner script must be syntactically valid shell (real parser check, not
     # just our own string matching).

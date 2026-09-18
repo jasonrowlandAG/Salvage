@@ -108,8 +108,17 @@ def test_macos_parses_real_diskutil_fixture(monkeypatch):
     # disk0 is the physical disk hosting the boot container's physical store;
     # the root volume (/) lives on disk3s3s1, two hops down (disk0 -> disk3 -> disk3s3s1).
     # A destination validation check against disk0 must still resolve through that chain.
-    monkeypatch.setattr(os.path, "ismount", lambda p: str(p) == "/")
-    assert devices.is_path_on_device(Path("/Users/whoever"), disk0, result) is True
+    #
+    # This last check needs actual POSIX path semantics (Path("/Users/whoever").resolve()
+    # meaning an absolute path, not a Windows drive-relative one) -- the sys.platform pin
+    # above covers this module's own `if sys.platform == ...` branches, but can't change
+    # which Path subclass the interpreter itself instantiates, since that's driven by the
+    # real os.name, not the monkeypatched sys.platform. So this part only runs on an
+    # actual POSIX host; Windows' own version of this check lives in the
+    # test_is_path_on_device_windows_* tests below.
+    if os.name == "posix":
+        monkeypatch.setattr(os.path, "ismount", lambda p: str(p) == "/")
+        assert devices.is_path_on_device(Path("/Users/whoever"), disk0, result) is True
 
 
 def test_macos_missing_info_is_skipped():
