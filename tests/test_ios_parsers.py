@@ -40,12 +40,24 @@ from salvage.engine.sqlite_recover import recover_records
 
 def _make_db(tmp_path: Path, name: str, schema: str) -> Path:
     db_path = tmp_path / name
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA secure_delete=OFF")
+    conn = _connect(db_path)
     conn.executescript(schema)
     conn.commit()
     conn.close()
     return db_path
+
+
+def _connect(db_path: Path) -> sqlite3.Connection:
+    """secure_delete is a per-connection pragma, not a database-file setting, so it
+    has to be set again on every fresh connection -- not just the one _make_db() used
+    to create the schema. Without it, a DELETE's freed bytes may be immediately
+    zeroed rather than left recoverable, and whether that's SQLite's default with no
+    pragma set at all depends on how the linked libsqlite3 was built: off by default
+    on macOS's bundled SQLite, on by default on Ubuntu's system package -- which is
+    exactly why these recovery tests passed on macOS CI but failed on Ubuntu CI."""
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA secure_delete=OFF")
+    return conn
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +67,7 @@ def _make_db(tmp_path: Path, name: str, schema: str) -> Path:
 
 def test_parse_messages_live_text_chat_and_attachment(tmp_path):
     db = _make_db(tmp_path, "sms.db", _MESSAGE_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     conn.execute("INSERT INTO handle (ROWID, id, service) VALUES (1, '+15551234567', 'iMessage')")
     conn.execute(
         "INSERT INTO chat (ROWID, guid, chat_identifier, display_name) VALUES (1, 'chat-1', '+15551234567', NULL)"
@@ -86,7 +98,7 @@ def test_parse_messages_live_text_chat_and_attachment(tmp_path):
 
 def test_parse_messages_decodes_attributed_body_when_text_is_null(tmp_path):
     db = _make_db(tmp_path, "sms.db", _MESSAGE_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     conn.execute("INSERT INTO handle (ROWID, id, service) VALUES (1, '+15551234567', 'iMessage')")
     blob = _fake_attributed_body("decoded from attributedBody")
     conn.execute(
@@ -104,7 +116,7 @@ def test_parse_messages_decodes_attributed_body_when_text_is_null(tmp_path):
 
 def test_parse_messages_group_chat_uses_display_name_or_joined_handles(tmp_path):
     db = _make_db(tmp_path, "sms.db", _MESSAGE_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     conn.execute("INSERT INTO handle (ROWID, id, service) VALUES (1, 'alice@example.com', 'iMessage')")
     conn.execute("INSERT INTO handle (ROWID, id, service) VALUES (2, 'bob@example.com', 'iMessage')")
     conn.execute(
@@ -138,7 +150,7 @@ def test_recover_records_finds_deleted_message_reclaimed_into_gap(tmp_path):
     # written cell on the page — i.e. the highest ROWID(s). That's the
     # reliable recovery path this module targets.
     db = _make_db(tmp_path, "sms.db", _MESSAGE_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     _insert_messages(conn, 60)
     conn.commit()
     conn.execute("DELETE FROM message WHERE ROWID = (SELECT MAX(ROWID) FROM message)")
@@ -151,7 +163,7 @@ def test_recover_records_finds_deleted_message_reclaimed_into_gap(tmp_path):
 
 def test_parse_messages_marks_recently_deleted_from_recoverable_join(tmp_path):
     db = _make_db(tmp_path, "sms.db", _MESSAGE_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     conn.execute("INSERT INTO handle (ROWID, id, service) VALUES (1, '+15551234567', 'iMessage')")
     conn.execute(
         "INSERT INTO chat (ROWID, guid, chat_identifier, display_name) VALUES (1, 'chat-1', '+15551234567', NULL)"
@@ -183,7 +195,7 @@ def test_parse_messages_marks_recently_deleted_from_recoverable_join(tmp_path):
 
 def test_parse_messages_merges_recovered_deleted_rows(tmp_path):
     db = _make_db(tmp_path, "sms.db", _MESSAGE_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     conn.execute("INSERT INTO handle (ROWID, id, service) VALUES (1, '+15551234567', 'iMessage')")
     _insert_messages(conn, 60)
     conn.commit()
@@ -208,7 +220,7 @@ def test_parse_messages_merges_recovered_deleted_rows(tmp_path):
 
 def test_parse_contacts_live(tmp_path):
     db = _make_db(tmp_path, "AddressBook.sqlitedb", _ADDRESSBOOK_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     conn.execute("INSERT INTO ABPerson (ROWID, First, Last, Organization) VALUES (1, 'Ada', 'Lovelace', NULL)")
     conn.execute("INSERT INTO ABMultiValue (record_id, property, value) VALUES (1, 3, '+15551234567')")
     conn.execute("INSERT INTO ABMultiValue (record_id, property, value) VALUES (1, 4, 'ada@example.com')")
@@ -225,7 +237,7 @@ def test_parse_contacts_live(tmp_path):
 
 def test_parse_contacts_recovers_deleted_person(tmp_path):
     db = _make_db(tmp_path, "AddressBook.sqlitedb", _ADDRESSBOOK_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     for i in range(60):
         conn.execute(
             "INSERT INTO ABPerson (First, Last, Organization) VALUES (?, ?, NULL)",
@@ -249,7 +261,7 @@ def test_parse_contacts_recovers_deleted_person(tmp_path):
 
 def test_parse_notes_decodes_body_and_folder(tmp_path):
     db = _make_db(tmp_path, "NoteStore.sqlite", _NOTESTORE_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     conn.execute(
         "INSERT INTO ZICCLOUDSYNCINGOBJECT (Z_PK, ZTITLE2, ZFOLDERTYPE) VALUES (1, 'Notes', 0)"
     )
@@ -293,7 +305,7 @@ def _insert_note_rows(conn, n: int) -> None:
 
 def test_parse_notes_recovers_deleted_note_body(tmp_path):
     db = _make_db(tmp_path, "NoteStore.sqlite", _NOTESTORE_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     _insert_note_rows(conn, 60)
     conn.commit()
     last_pk = conn.execute("SELECT MAX(Z_PK) FROM ZICNOTEDATA").fetchone()[0]
@@ -313,7 +325,7 @@ def test_parse_notes_recovers_deleted_note_body(tmp_path):
 
 def test_parse_whatsapp_live(tmp_path):
     db = _make_db(tmp_path, "ChatStorage.sqlite", _WHATSAPP_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     conn.execute(
         "INSERT INTO ZWACHATSESSION (Z_PK, ZCONTACTJID, ZPARTNERNAME) VALUES (1, '61400000000@s.whatsapp.net', 'Sam')"
     )
@@ -393,7 +405,7 @@ def test_export_notes_txt_writes_one_file_per_note(tmp_path):
 
 def test_parse_call_history(tmp_path):
     db = _make_db(tmp_path, "CallHistory.storedata", _CALL_HISTORY_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     conn.execute(
         "INSERT INTO ZCALLRECORD (ZADDRESS, ZDATE, ZDURATION, ZORIGINATED, ZANSWERED, "
         "ZSERVICE_PROVIDER) VALUES (?, ?, ?, ?, ?, ?)",
@@ -421,7 +433,7 @@ def test_parse_call_history(tmp_path):
 
 def test_parse_call_history_csv_export(tmp_path):
     db = _make_db(tmp_path, "CallHistory.storedata", _CALL_HISTORY_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     conn.execute(
         "INSERT INTO ZCALLRECORD (ZADDRESS, ZDATE, ZDURATION, ZORIGINATED, ZANSWERED, "
         "ZSERVICE_PROVIDER) VALUES (?, ?, ?, ?, ?, ?)",
@@ -445,7 +457,7 @@ def test_parse_call_history_csv_export(tmp_path):
 
 def test_parse_safari_history(tmp_path):
     db = _make_db(tmp_path, "History.db", _SAFARI_HISTORY_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     conn.execute("INSERT INTO history_items (id, url, visit_count) VALUES (1, ?, 5)", ("https://example.com/",))
     conn.execute(
         "INSERT INTO history_visits (history_item, visit_time, title) VALUES (1, ?, ?)",
@@ -468,7 +480,7 @@ def test_parse_safari_history(tmp_path):
 
 def test_parse_safari_history_csv_export(tmp_path):
     db = _make_db(tmp_path, "History.db", _SAFARI_HISTORY_SCHEMA)
-    conn = sqlite3.connect(db)
+    conn = _connect(db)
     conn.execute("INSERT INTO history_items (id, url, visit_count) VALUES (1, ?, 2)", ("https://example.com/",))
     conn.execute(
         "INSERT INTO history_visits (history_item, visit_time, title) VALUES (1, ?, ?)",
