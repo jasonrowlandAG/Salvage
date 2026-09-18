@@ -44,11 +44,18 @@ jobs:
       - name: Install recovery tools (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
           $ProgressPreference = "SilentlyContinue"  # Invoke-WebRequest's progress bar is extremely slow in CI logs
           $tools = "$env:RUNNER_TEMP\tools"
           New-Item -ItemType Directory -Force -Path $tools | Out-Null
+          # Unauthenticated api.github.com calls are capped at 60/hour per source IP,
+          # shared across every job hitting GitHub's IP ranges at once -- easy to trip
+          # even from a single workflow's own test+build jobs running together. The
+          # built-in token raises that to 5000/hour and needs no extra permissions.
+          $ghHeaders = @{ Authorization = "Bearer $env:GH_TOKEN" }
 
           Write-Host "==> Downloading TestDisk/PhotoRec 7.2 (Windows 64-bit)"
           Invoke-WebRequest -Uri "https://www.cgsecurity.org/testdisk-7.2.win64.zip" -OutFile "$tools\testdisk.zip"
@@ -58,7 +65,7 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value $photorecDir
 
           Write-Host "==> Downloading the latest Sleuth Kit Windows release"
-          $skRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/sleuthkit/sleuthkit/releases/latest"
+          $skRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/sleuthkit/sleuthkit/releases/latest" -Headers $ghHeaders
           $skAsset = $skRelease.assets | Where-Object { $_.name -like "*win32*.zip" -or $_.name -like "*win64*.zip" } | Select-Object -First 1
           if (-not $skAsset) { throw "no Windows zip asset found on the latest sleuthkit release" }
           Invoke-WebRequest -Uri $skAsset.browser_download_url -OutFile "$tools\sleuthkit.zip"
@@ -93,11 +100,14 @@ jobs:
 
       - name: Install recovery tools (Windows)
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
           $ProgressPreference = "SilentlyContinue"
           $tools = "$env:RUNNER_TEMP\tools"
           New-Item -ItemType Directory -Force -Path $tools | Out-Null
+          $ghHeaders = @{ Authorization = "Bearer $env:GH_TOKEN" }
 
           Invoke-WebRequest -Uri "https://www.cgsecurity.org/testdisk-7.2.win64.zip" -OutFile "$tools\testdisk.zip"
           Expand-Archive -Path "$tools\testdisk.zip" -DestinationPath "$tools\testdisk" -Force
@@ -105,7 +115,7 @@ jobs:
           if (-not $photorecDir) { throw "photorec_win.exe not found after extracting testdisk-7.2.win64.zip" }
           Add-Content -Path $env:GITHUB_PATH -Value $photorecDir
 
-          $skRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/sleuthkit/sleuthkit/releases/latest"
+          $skRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/sleuthkit/sleuthkit/releases/latest" -Headers $ghHeaders
           $skAsset = $skRelease.assets | Where-Object { $_.name -like "*win32*.zip" -or $_.name -like "*win64*.zip" } | Select-Object -First 1
           if (-not $skAsset) { throw "no Windows zip asset found on the latest sleuthkit release" }
           Invoke-WebRequest -Uri $skAsset.browser_download_url -OutFile "$tools\sleuthkit.zip"
