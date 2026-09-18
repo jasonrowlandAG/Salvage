@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -25,10 +25,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from salvage.engine import thumbcache
 from salvage.engine.models import Category, Integrity, RecoveredFile, ScanResult
 from salvage.ui.format_utils import human_size
 from salvage.ui.preview_panel import PreviewPanel
-from salvage.ui.thumbnails import ThumbnailLoader
+from salvage.ui.thumb_service import BackgroundThumbnailService
 from salvage.ui.workers import VerifyWorker
 
 PathRole = Qt.ItemDataRole.UserRole + 1
@@ -297,8 +298,17 @@ class ResultsPage(QWidget):
         self.controller = controller
         self.model: FileListModel | None = None
         self._current_category: str | None = None
-        self.thumb_loader = ThumbnailLoader(self)
-        self.thumb_loader.ready.connect(self._on_thumb_ready)
+        # Background, throttled thumbnail generation shared with the Mac-media flow
+        # (thumb_service.py) instead of firing one unthrottled QRunnable per image the
+        # instant results land - that flood used to freeze the grid for ~20s+ at
+        # realistic result counts (docs/ux-review.md finding 4.1).
+        self.thumb_service = BackgroundThumbnailService(self)
+        self.thumb_service.thumb_ready.connect(self._on_thumb_ready)
+        self.thumb_service.progress.connect(self._on_thumb_progress)
+        self._thumb_timer = QTimer(self)
+        self._thumb_timer.setSingleShot(True)
+        self._thumb_timer.setInterval(120)
+        self._thumb_timer.timeout.connect(self._request_visible_thumbnails)
         self._verify_worker: VerifyWorker | None = None
         self._build_ui()
 
@@ -348,6 +358,7 @@ class ResultsPage(QWidget):
         self.list_view.setUniformItemSizes(True)
         self.list_view.setSelectionMode(QListView.SelectionMode.SingleSelection)
         self.list_view.setItemDelegate(FileTileDelegate(self))
+        self.list_view.verticalScrollBar().valueChanged.connect(lambda _: self._thumb_timer.start())
         self.center_stack.addWidget(self.list_view)
         self.empty_label = QLabel("No files match your filters.")
         self.empty_label.setProperty("role", "subheading")
@@ -365,6 +376,10 @@ class ResultsPage(QWidget):
         # below their own label width (they were clipping to e.g. "ect all (filtere").
         self.verify_progress_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         footer_row.addWidget(self.verify_progress_label)
+        self.thumb_progress_label = QLabel("")
+        self.thumb_progress_label.setProperty("role", "subheading")
+        self.thumb_progress_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        footer_row.addWidget(self.thumb_progress_label)
         footer_row.addStretch()
         select_all_btn = QPushButton("Select all (filtered)")
         select_all_btn.clicked.connect(self._select_all_filtered)
@@ -419,8 +434,10 @@ class ResultsPage(QWidget):
         self._update_preview(None)
         self._update_footer()
 
-        for f in self.model.image_files():
-            self.thumb_loader.request(f.path)
+        thumbable = [f.path for f in self.model.image_files()]
+        self.thumb_progress_label.setText(f"Thumbnails 0 / {len(thumbable):,}" if thumbable else "")
+        self.thumb_service.start(thumbable)
+        self._thumb_timer.start()
 
         self._start_verification()
 
@@ -486,6 +503,7 @@ class ResultsPage(QWidget):
         )
         empty = self.model.rowCount() == 0
         self.center_stack.setCurrentWidget(self.empty_label if empty else self.list_view)
+        self._thumb_timer.start()
 
     def _on_current_changed(self, current: QModelIndex, previous: QModelIndex) -> None:
         if not current.isValid() or self.model is None:
@@ -510,11 +528,48 @@ class ResultsPage(QWidget):
             f.path, f.category, name=f.name, size_text=human_size(f.size), meta_lines=meta_lines
         )
 
-    def _on_thumb_ready(self, path_str: str, pixmap: QPixmap) -> None:
-        if self.model is not None:
+    def _on_thumb_ready(self, path_str: str, cache_path) -> None:
+        if self.model is None or cache_path is None:
+            return
+        pixmap = QPixmap(str(cache_path))
+        if not pixmap.isNull():
             self.model.set_thumbnail(path_str, pixmap)
 
+    def _on_thumb_progress(self, done: int, total: int) -> None:
+        self.thumb_progress_label.setText(f"Thumbnails {done:,} / {total:,}")
+
+    def _request_visible_thumbnails(self) -> None:
+        """Prioritises the thumbnail queue for whatever's currently on screen, same
+        viewport-first approach as media_results_page.py's _request_visible_thumbnails."""
+        if self.model is None or self.model.rowCount() == 0:
+            return
+        viewport = self.list_view.viewport()
+        rect = viewport.rect()
+        start_index = self.list_view.indexAt(rect.topLeft())
+        end_index = self.list_view.indexAt(rect.bottomRight())
+        start_row = start_index.row() if start_index.isValid() else 0
+        end_row = end_index.row() if end_index.isValid() else self.model.rowCount() - 1
+        margin = 40
+        start_row = max(0, start_row - margin)
+        end_row = min(self.model.rowCount() - 1, end_row + margin)
+        visible_paths = []
+        for row in range(start_row, end_row + 1):
+            f = self.model.data(self.model.index(row), PathRole)
+            if f is None or f.category != "image":
+                continue
+            if str(f.path) in self.model._thumbs:
+                continue
+            visible_paths.append(f.path)
+            cached = thumbcache.get(f.path)
+            if cached is not None:
+                pixmap = QPixmap(str(cached))
+                if not pixmap.isNull():
+                    self.model.set_thumbnail(str(f.path), pixmap)
+        if visible_paths:
+            self.thumb_service.prioritize(visible_paths)
+
     def _go_back(self) -> None:
+        self.thumb_service.cancel()
         self.preview_panel.release()
         self.controller.go_to_options(self.controller.session.device)
 

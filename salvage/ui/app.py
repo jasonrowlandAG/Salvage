@@ -269,4 +269,6 @@ class MainWindow(QMainWindow):
             media_worker.wait(5000)
         self.media_results_page.thumb_service.cancel()
         self.media_results_page.thumb_service.wait(3000)
+        self.results_page.thumb_service.cancel()
+        self.results_page.thumb_service.wait(3000)
         super().closeEvent(event)
