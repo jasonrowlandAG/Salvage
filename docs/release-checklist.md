@@ -24,3 +24,36 @@ sales materials) is honest that recovery odds drop sharply, often to zero, on an
 SSD where TRIM has already run for the deleted file — for both Windows and macOS.
 Don't imply recovery is reliably possible on a TRIM-capable SSD after enough time
 has passed for the TRIM to execute.
+
+## NTFS deleted-file recovery: verified end to end on real Windows
+
+Confirmed via `tests/test_windows_ntfs.py` on a Windows CI runner (diskpart-built
+NTFS volume in a fixed VHD): FilesystemEngine (Quick scan) and PhotoRecEngine (Deep
+scan) both correctly recover deleted files on NTFS — real names, real folders, and
+byte-identical content, not just "something was found." Two real engine bugs were
+found and fixed along the way (both in `salvage/engine/filesystem.py`):
+
+- `fls`'s mode field for a deleted NTFS entry is `-/r...` (the directory entry is
+  left unallocated), not the `r/r...` FAT/exFAT/HFS+ use — the old check discarded
+  every deleted NTFS file outright. Fixed by deciding "regular file" from the
+  meta-type (after the slash) rather than requiring both sides to agree.
+- NTFS lists a deleted file's `$FILE_NAME` attribute as a separate, metadata-only
+  fls row alongside its real `$DATA` row — without filtering, every NTFS file was
+  "recovered" twice, once correctly and once as a tiny wrong-content duplicate.
+- `icat` can hand back a whole allocated cluster rather than truncating to a file's
+  recorded logical size (cluster slack); FilesystemEngine now truncates to fls's
+  reported size when known.
+
+## Windows scan progress granularity on very small/fast scans (minor, unconfirmed either way)
+
+`test_photorec_carves_deleted_ntfs_files_with_live_progress` originally asserted
+that PhotoRec's live progress (via pywinpty) advances across at least two distinct
+sector readings, to distinguish genuine streaming from a silent fallback that only
+reports once at exit. On the ~95 MB test VHD, PhotoRec's DEEP scan finishes on CI
+hardware well within a second — too fast to reliably sample more than one reading
+even when streaming is working correctly — so the test was relaxed to require only
+that at least one live update arrived. This wasn't re-verified against a scan large
+enough to prove multiple genuinely distinct readings arrive over time on Windows;
+if progress-bar smoothness during a real (multi-second-or-longer) Deep scan ever
+looks coarser on Windows than on macOS, check pywinpty's streaming behaviour there
+specifically before assuming it's a UI bug.
