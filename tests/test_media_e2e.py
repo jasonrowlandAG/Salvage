@@ -18,6 +18,7 @@ from __future__ import annotations
 import io
 import os
 import sqlite3
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -337,6 +338,12 @@ _EXPECTED_TICKED_KEY_PREFIXES = (
 )
 
 
+@pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="drives local_media.default_sources()'s real macOS sweep (Photos library, "
+    "Messages, iCloud Drive, cloud storage) through the actual UI; Windows has its own "
+    "distinct source list with no equivalent of these, see test_local_media.py instead",
+)
 def test_media_search_finds_everything_and_only_that(tmp_path, monkeypatch):
     home, expected, backup_dir, dataless_path = _plant_home(tmp_path)
 
