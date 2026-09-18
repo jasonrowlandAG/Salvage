@@ -72,6 +72,28 @@ def _free_drive_letter() -> str:
     raise RuntimeError("no free drive letter available for the test NTFS volume")
 
 
+def _win_path(p: Path) -> str:
+    """A guaranteed backslash-separated path string. diskpart is a minimal, old
+    command interpreter -- don't rely on however Path.__str__/__format__ happens to
+    render a given Path (observed producing forward slashes for some paths in CI)."""
+    return str(p).replace("/", "\\")
+
+
+def _verify_volume_via_powershell(letter: str) -> str:
+    """Independent confirmation (not diskpart) that `letter:` really is the NTFS
+    volume this fixture just formatted, for diagnostics if anything downstream comes
+    back empty. Returns a human-readable description; raises with full detail if the
+    volume isn't what's expected."""
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", f"Get-Volume -DriveLetter {letter} | Format-List | Out-String"],
+        capture_output=True, text=True, timeout=30,
+    )
+    info = (proc.stdout or "") + (proc.stderr or "")
+    if proc.returncode != 0 or "NTFS" not in info:
+        raise AssertionError(f"Get-Volume -DriveLetter {letter} does not show an NTFS volume:\n{info}")
+    return info
+
+
 def _make_minimal_docx() -> bytes:
     """A genuinely valid (if minimal) OOXML .docx -- just enough for PhotoRec's
     zip-signature carving and a real zipfile round-trip, not a full Word doc."""
@@ -107,33 +129,57 @@ def _make_minimal_docx() -> bytes:
 
 
 @pytest.fixture(scope="module")
-def ntfs_volume(tmp_path_factory):
+def ntfs_volume(tmp_path_factory, capsys):
     """Creates a fixed VHD, formats it NTFS, plants three known files in nested
     folders, deletes two of them (keeping one live -- same shape as
     tests/test_filesystem.py's macOS fixtures), detaches, and returns the VHD path
-    plus every planted file's original bytes for byte-identical comparison."""
+    plus every planted file's original bytes for byte-identical comparison.
+
+    Prints diagnostics with capture disabled (not just on failure) since this is a
+    module-scoped fixture: its own setup output would otherwise only ever appear
+    attached to whichever test happens to trigger it first, not to a later test that
+    actually fails."""
+    with capsys.disabled():
+        return _build_ntfs_volume(tmp_path_factory)
+
+
+def _build_ntfs_volume(tmp_path_factory) -> dict:
     base = tmp_path_factory.mktemp("ntfs")
     vhd_path = base / "test_ntfs.vhd"
+    vhd_str = _win_path(vhd_path)
     letter = _free_drive_letter()
 
     create_script = (
-        f'create vdisk file="{vhd_path}" maximum={VHD_SIZE_MB} type=fixed\r\n'
-        f'select vdisk file="{vhd_path}"\r\n'
+        f'create vdisk file="{vhd_str}" maximum={VHD_SIZE_MB} type=fixed\r\n'
+        f'select vdisk file="{vhd_str}"\r\n'
         "attach vdisk\r\n"
         "create partition primary\r\n"
         "format fs=ntfs quick label=TESTNTFS\r\n"
         f"assign letter={letter}\r\n"
+        "list volume\r\n"
         "exit\r\n"
     )
     proc = _run_diskpart(create_script)
-    assert proc.returncode == 0, f"diskpart create/attach/format failed:\n{proc.stdout}\n{proc.stderr}"
+    diskpart_report = f"diskpart script:\n{create_script}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+    print(f"\n{diskpart_report}")
+    # diskpart's own process exit code reflects whether the script engine ran at all,
+    # not whether every individual command inside it succeeded -- a failed command
+    # still typically leaves the exit code at 0, so check its own reported text too.
+    assert proc.returncode == 0, f"diskpart exited {proc.returncode}\n{diskpart_report}"
+    assert "error" not in proc.stdout.lower(), f"diskpart reported an error:\n{diskpart_report}"
 
     mount = Path(f"{letter}:\\")
-    for _ in range(20):
+    for _ in range(40):
         if mount.exists():
             break
         time.sleep(0.5)
-    assert mount.exists(), f"NTFS volume did not mount at {mount} after diskpart reported success"
+    assert mount.exists(), f"NTFS volume did not mount at {mount} after diskpart:\n{diskpart_report}"
+
+    # Independent confirmation (via Get-Volume, not diskpart) that this letter really
+    # is the NTFS volume just formatted -- catches a silently-wrong letter/format
+    # rather than leaving "recovered nothing" to be debugged blind three tests later.
+    volume_info = _verify_volume_via_powershell(letter)
+    print(f"\nGet-Volume -DriveLetter {letter}:\n{volume_info}")
 
     try:
         jpeg_dir = mount.joinpath(*_JPEG_DIR_PARTS)
@@ -152,14 +198,23 @@ def ntfs_volume(tmp_path_factory):
         pdf_bytes = b"%PDF-1.4\nfake pdf content for the Windows NTFS recovery test\n"
         pdf_path.write_bytes(pdf_bytes)
 
+        planted = sorted(str(p.relative_to(mount)) for p in mount.rglob("*") if p.is_file())
+        print(f"\nplanted on {mount} before delete: {planted}")
+        assert len(planted) == 3, f"expected 3 planted files on {mount}, found {planted}"
+
         # Delete two of the three; the pdf stays live, mirroring test_filesystem.py's
         # "one never-deleted file must NOT show up in the default deleted-only scan"
         # assertion.
         jpeg_path.unlink()
         docx_path.unlink()
+
+        remaining = sorted(str(p.relative_to(mount)) for p in mount.rglob("*") if p.is_file())
+        print(f"remaining on {mount} after delete: {remaining}")
+        assert remaining == [str(Path(*_DOC_DIR_PARTS) / _PDF_NAME)]
     finally:
-        detach_script = f'select vdisk file="{vhd_path}"\r\ndetach vdisk\r\nexit\r\n'
-        _run_diskpart(detach_script)
+        detach_script = f'select vdisk file="{vhd_str}"\r\ndetach vdisk\r\nexit\r\n'
+        detach_proc = _run_diskpart(detach_script)
+        print(f"\ndiskpart detach stdout:\n{detach_proc.stdout}\nstderr:\n{detach_proc.stderr}")
 
     return {
         "vhd_path": vhd_path,
