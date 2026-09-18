@@ -65,6 +65,16 @@ def _run_diskpart(script_text: str, timeout: float = 90) -> subprocess.Completed
         Path(script_path).unlink(missing_ok=True)
 
 
+def _log(msg: str) -> None:
+    """Write straight to the real stderr, bypassing pytest's output capture, so
+    diagnostics show up in CI regardless of which test (if any) ends up failing --
+    plain print() would only surface if the specific test/fixture invocation that
+    produced it were the one that failed, and ntfs_volume is a module-scoped
+    fixture whose setup output pytest attaches to whichever test triggers it first,
+    not necessarily the one that later fails."""
+    print(msg, file=sys.__stderr__, flush=True)
+
+
 def _free_drive_letter() -> str:
     for letter in "TUVWXYZ":
         if not Path(f"{letter}:\\").exists():
@@ -129,18 +139,12 @@ def _make_minimal_docx() -> bytes:
 
 
 @pytest.fixture(scope="module")
-def ntfs_volume(tmp_path_factory, capsys):
+def ntfs_volume(tmp_path_factory):
     """Creates a fixed VHD, formats it NTFS, plants three known files in nested
     folders, deletes two of them (keeping one live -- same shape as
     tests/test_filesystem.py's macOS fixtures), detaches, and returns the VHD path
-    plus every planted file's original bytes for byte-identical comparison.
-
-    Prints diagnostics with capture disabled (not just on failure) since this is a
-    module-scoped fixture: its own setup output would otherwise only ever appear
-    attached to whichever test happens to trigger it first, not to a later test that
-    actually fails."""
-    with capsys.disabled():
-        return _build_ntfs_volume(tmp_path_factory)
+    plus every planted file's original bytes for byte-identical comparison."""
+    return _build_ntfs_volume(tmp_path_factory)
 
 
 def _build_ntfs_volume(tmp_path_factory) -> dict:
@@ -161,7 +165,7 @@ def _build_ntfs_volume(tmp_path_factory) -> dict:
     )
     proc = _run_diskpart(create_script)
     diskpart_report = f"diskpart script:\n{create_script}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
-    print(f"\n{diskpart_report}")
+    _log(f"\n{diskpart_report}")
     # diskpart's own process exit code reflects whether the script engine ran at all,
     # not whether every individual command inside it succeeded -- a failed command
     # still typically leaves the exit code at 0, so check its own reported text too.
@@ -179,7 +183,7 @@ def _build_ntfs_volume(tmp_path_factory) -> dict:
     # is the NTFS volume just formatted -- catches a silently-wrong letter/format
     # rather than leaving "recovered nothing" to be debugged blind three tests later.
     volume_info = _verify_volume_via_powershell(letter)
-    print(f"\nGet-Volume -DriveLetter {letter}:\n{volume_info}")
+    _log(f"\nGet-Volume -DriveLetter {letter}:\n{volume_info}")
 
     try:
         jpeg_dir = mount.joinpath(*_JPEG_DIR_PARTS)
@@ -199,7 +203,7 @@ def _build_ntfs_volume(tmp_path_factory) -> dict:
         pdf_path.write_bytes(pdf_bytes)
 
         planted = sorted(str(p.relative_to(mount)) for p in mount.rglob("*") if p.is_file())
-        print(f"\nplanted on {mount} before delete: {planted}")
+        _log(f"\nplanted on {mount} before delete: {planted}")
         assert len(planted) == 3, f"expected 3 planted files on {mount}, found {planted}"
 
         # Delete two of the three; the pdf stays live, mirroring test_filesystem.py's
@@ -209,12 +213,12 @@ def _build_ntfs_volume(tmp_path_factory) -> dict:
         docx_path.unlink()
 
         remaining = sorted(str(p.relative_to(mount)) for p in mount.rglob("*") if p.is_file())
-        print(f"remaining on {mount} after delete: {remaining}")
+        _log(f"remaining on {mount} after delete: {remaining}")
         assert remaining == [str(Path(*_DOC_DIR_PARTS) / _PDF_NAME)]
     finally:
         detach_script = f'select vdisk file="{vhd_str}"\r\ndetach vdisk\r\nexit\r\n'
         detach_proc = _run_diskpart(detach_script)
-        print(f"\ndiskpart detach stdout:\n{detach_proc.stdout}\nstderr:\n{detach_proc.stderr}")
+        _log(f"\ndiskpart detach stdout:\n{detach_proc.stdout}\nstderr:\n{detach_proc.stderr}")
 
     return {
         "vhd_path": vhd_path,
@@ -274,7 +278,7 @@ def test_filesystem_engine_include_existing_finds_live_pdf(tmp_path, ntfs_volume
 # ---------------------------------------------------------------------------
 
 
-def test_photorec_carves_deleted_ntfs_files_with_live_progress(tmp_path, ntfs_volume, capsys):
+def test_photorec_carves_deleted_ntfs_files_with_live_progress(tmp_path, ntfs_volume):
     engine = PhotoRecEngine()
     progress_updates = []
     result = engine.scan(
@@ -295,11 +299,10 @@ def test_photorec_carves_deleted_ntfs_files_with_live_progress(tmp_path, ntfs_vo
     # one final flush right before exit, so at most one distinct non-zero sector
     # reading is ever observed. A real streaming scan reports many.
     sector_values = sorted({p.sector for p in progress_updates if p.sector > 0})
-    with capsys.disabled():
-        print(
-            f"\nphotorec live-progress check: {len(progress_updates)} on_progress call(s), "
-            f"{len(sector_values)} distinct non-zero sector reading(s)"
-        )
+    _log(
+        f"\nphotorec live-progress check: {len(progress_updates)} on_progress call(s), "
+        f"{len(sector_values)} distinct non-zero sector reading(s)"
+    )
     assert len(sector_values) >= 2, (
         "expected PhotoRec's sector count to advance across multiple live progress "
         f"updates via pywinpty, not jump once at exit; observed {sector_values}"
@@ -311,7 +314,7 @@ def test_photorec_carves_deleted_ntfs_files_with_live_progress(tmp_path, ntfs_vo
 # ---------------------------------------------------------------------------
 
 
-def test_combined_engine_merges_ntfs_results_without_duplicates(tmp_path, ntfs_volume, capsys):
+def test_combined_engine_merges_ntfs_results_without_duplicates(tmp_path, ntfs_volume):
     combined = CombinedEngine(FilesystemEngine(), PhotoRecEngine())
     result = combined.scan(ntfs_volume["vhd_path"], tmp_path, mode=ScanMode.THOROUGH)
 
@@ -329,9 +332,8 @@ def test_combined_engine_merges_ntfs_results_without_duplicates(tmp_path, ntfs_v
     assert docx_matches[0].original_name == _DOCX_NAME
 
     named = sorted(f.original_name for f in result.files if f.original_name)
-    with capsys.disabled():
-        print(
-            f"\nNTFS recovery summary (Thorough/CombinedEngine): {len(result.files)} total "
-            f"result(s) merged from filesystem + carve, {len(named)} with recovered original "
-            f"names: {named}"
-        )
+    _log(
+        f"\nNTFS recovery summary (Thorough/CombinedEngine): {len(result.files)} total "
+        f"result(s) merged from filesystem + carve, {len(named)} with recovered original "
+        f"names: {named}"
+    )
