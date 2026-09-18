@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import plistlib
 import sqlite3
+import stat
 import struct
 from pathlib import Path
 
@@ -347,21 +348,67 @@ def test_backup_reader_no_password_leaves_reader_locked(tmp_path):
         reader.close()
 
 
-def test_backup_reader_caches_decrypted_manifest_db(tmp_path):
+def test_backup_reader_decrypted_manifest_cache_is_private_and_not_beside_backup_dir(tmp_path):
+    # The decrypted Manifest.db holds the backup's full SMS/contacts/notes index -
+    # it must not be written as a sibling of backup_dir (which can be any folder a
+    # file picker reached: a USB stick, a network share, someone else's old backup),
+    # and it must be created private (0700 dir / 0600 file) from the start rather
+    # than left at the process's default umask.
     backup_dir = build_synthetic_encrypted_backup(tmp_path, "ENCUDID5", _ENC_PASSWORD)
     reader = BackupReader(backup_dir, password=_ENC_PASSWORD)
-    reader.close()
-
-    cache_path = backup_dir.parent / "salvage_cache" / backup_dir.name / "Manifest.decrypted.db"
-    assert cache_path.exists()
-    assert cache_path.read_bytes().startswith(b"SQLite format 3\x00")
-
-    # Reopening reuses the cache rather than re-deriving from scratch; still readable.
-    reader2 = BackupReader(backup_dir, password=_ENC_PASSWORD)
     try:
-        assert reader2.find(domain="HomeDomain", relative_path_like="Library/SMS/sms.db")
+        cache_dir = reader._cache_dir
+        assert cache_dir is not None
+        cache_path = cache_dir / "Manifest.decrypted.db"
+        assert cache_path.exists()
+        assert cache_path.read_bytes().startswith(b"SQLite format 3\x00")
+
+        # Never beside the user-chosen backup folder.
+        assert backup_dir.parent not in cache_dir.parents
+        assert cache_dir != backup_dir.parent / "salvage_cache" / backup_dir.name
+
+        assert stat.S_IMODE(cache_dir.stat().st_mode) == 0o700
+        assert stat.S_IMODE(cache_path.stat().st_mode) == 0o600
+
+        # Still fully usable while open.
+        assert reader.find(domain="HomeDomain", relative_path_like="Library/SMS/sms.db")
     finally:
-        reader2.close()
+        reader.close()
+
+    # Deleted once the reader is done with it - it must not persist indefinitely.
+    assert not cache_dir.exists()
+
+
+def test_backup_reader_decrypted_manifest_cache_deleted_via_context_manager(tmp_path):
+    backup_dir = build_synthetic_encrypted_backup(tmp_path, "ENCUDID6", _ENC_PASSWORD)
+    with BackupReader(backup_dir, password=_ENC_PASSWORD) as reader:
+        cache_dir = reader._cache_dir
+        assert cache_dir is not None
+        assert cache_dir.exists()
+    assert not cache_dir.exists()
+
+
+def test_cleanup_stale_ios_caches_removes_leftover_cache_dirs_only(tmp_path, monkeypatch):
+    import tempfile as tempfile_module
+
+    from salvage.engine.ios import _CACHE_DIR_PREFIX, cleanup_stale_ios_caches
+
+    monkeypatch.setattr(tempfile_module, "gettempdir", lambda: str(tmp_path))
+
+    stale = tmp_path / f"{_CACHE_DIR_PREFIX}abc123"
+    stale.mkdir()
+    (stale / "Manifest.decrypted.db").write_bytes(b"leftover from a crashed run")
+
+    unrelated_dir = tmp_path / "some_other_apps_tempdir"
+    unrelated_dir.mkdir()
+    unrelated_file = tmp_path / f"{_CACHE_DIR_PREFIX}not_a_dir"
+    unrelated_file.write_bytes(b"not a directory - must be left alone")
+
+    cleanup_stale_ios_caches()
+
+    assert not stale.exists()
+    assert unrelated_dir.exists()
+    assert unrelated_file.exists()
 
 
 def test_manifest_file_size_parses_synthetic_blob():

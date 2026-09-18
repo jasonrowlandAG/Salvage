@@ -7,6 +7,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from salvage.engine.ios import cleanup_stale_ios_caches
 from salvage.ui import engine_facade
 from salvage.ui.app import MainWindow
 from salvage.ui.style import STYLESHEET
@@ -16,6 +17,8 @@ def main() -> None:
     if "--print-engine" in sys.argv[1:]:
         _print_engine_info()
         return
+
+    cleanup_stale_ios_caches()  # best-effort sweep of any cache left by a prior crash
 
     fake = os.environ.get("SALVAGE_FAKE") == "1"
 

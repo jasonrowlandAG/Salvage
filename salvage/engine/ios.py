@@ -7,6 +7,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -487,6 +488,24 @@ def _manifest_file_keys(file_blob: bytes | None) -> tuple[bytes | None, int | No
 # Backup reading
 # ---------------------------------------------------------------------------
 
+_CACHE_DIR_PREFIX = "salvage_ios_"
+
+
+def cleanup_stale_ios_caches() -> None:
+    """Best-effort sweep of decrypted-manifest cache dirs left behind by a
+    previous run that crashed or was killed before BackupReader.close() ran
+    (e.g. a force-quit while a backup was open). Safe to call on every
+    startup: only ever removes tempfile.mkdtemp() dirs this module created
+    (the _CACHE_DIR_PREFIX prefix), never anything else in the temp root.
+    """
+    try:
+        temp_root = Path(tempfile.gettempdir())
+        for entry in temp_root.iterdir():
+            if entry.name.startswith(_CACHE_DIR_PREFIX) and entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+    except OSError:
+        pass  # never let a cleanup sweep block startup
+
 
 @dataclass(frozen=True)
 class BackupFile:
@@ -532,6 +551,7 @@ class BackupReader:
         self.is_encrypted = bool(manifest_plist.get("IsEncrypted", False))
         self._class_keys: dict[int, bytes] = {}
         self._conn: sqlite3.Connection | None = None
+        self._cache_dir: Path | None = None  # holds the decrypted Manifest.db, if any; see close()
 
         if not self.is_encrypted:
             self.needs_password = False
@@ -575,15 +595,36 @@ class BackupReader:
         if not plaintext.startswith(b"SQLite format 3\x00"):
             raise BackupPasswordError("Incorrect backup password.")
 
-        cache_dir = self.backup_dir.parent / "salvage_cache" / self.backup_dir.name
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        # This holds a full plaintext copy of the backup's manifest (SMS/contacts/
+        # notes index) - it must never land somewhere world-readable or predictable,
+        # and never as a sibling of backup_dir (which can be any folder a file picker
+        # reached, e.g. a USB stick or network share - not somewhere Salvage should be
+        # writing). mkdtemp() gives a per-user, 0700 directory regardless of umask;
+        # the file itself is opened with an explicit 0600 mode at creation, not
+        # chmod'd afterward. Deleted in close() once the caller is done with it.
+        cache_dir = Path(tempfile.mkdtemp(prefix=_CACHE_DIR_PREFIX))
+        self._cache_dir = cache_dir
         dest = cache_dir / "Manifest.decrypted.db"
-        dest.write_bytes(plaintext)
+        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(fd, plaintext)
+        finally:
+            os.close(fd)
         return dest
 
     def close(self) -> None:
         if self._conn is not None:
             self._conn.close()
+            self._conn = None
+        if self._cache_dir is not None:
+            shutil.rmtree(self._cache_dir, ignore_errors=True)
+            self._cache_dir = None
+
+    def __enter__(self) -> "BackupReader":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
 
     def info(self) -> dict:
         result: dict = {}

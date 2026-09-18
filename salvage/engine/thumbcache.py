@@ -96,9 +96,15 @@ def _generate_with_pillow(path: Path, dest: Path, max_size: int = THUMB_SIZE) ->
         with Image.open(path) as im:
             im = im.convert("RGB")
             im.thumbnail((max_size, max_size))
-            dest.parent.mkdir(parents=True, exist_ok=True)
+            # This cache holds thumbnails of whatever was scanned, including someone
+            # else's private photos (an old iPhone backup, a found drive, ...) - keep
+            # both the directory and each file locked to this user, not left at
+            # whatever the process umask happens to allow.
+            dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chmod(dest.parent, 0o700)  # tighten a dir that pre-dates this fix, too
             tmp = dest.with_suffix(".tmp")
             im.save(tmp, "JPEG", quality=JPEG_QUALITY)
+            os.chmod(tmp, 0o600)
             os.replace(tmp, dest)
         return True
     except Exception:
