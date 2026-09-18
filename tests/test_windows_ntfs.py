@@ -285,24 +285,19 @@ def _find(files, name: str):
 
 
 def test_diagnose_ntfs_fls_output(ntfs_volume):
-    """Not a correctness test -- always fails, with raw `fls` output against the NTFS
-    VHD (in two forms) embedded in the failure message, so a human can see exactly
-    how this TSK build represents a deleted NTFS entry. filesystem.py's parser
-    (_FLS_LINE_RE + the " (deleted)" suffix check on the name column) was written and
-    verified only against FAT32/exFAT/HFS+ output captured on macOS; NTFS may express
-    deletion differently (e.g. via the mode/type column rather than a literal
-    "(deleted)" suffix, or via -realloc entries).
-
-    Forced failure (rather than _log()/print()) is deliberate: pytest's default
-    capture redirects the underlying OS file descriptors, which sys.__stderr__
-    still writes through -- so a *passing* test's diagnostic output is silently
-    discarded regardless of which Python-level stream object you write to. A
-    failing test's captured output is always shown, capture mode or not.
+    """Not a correctness test -- dumps raw `fls` output against the NTFS VHD (in two
+    forms) via _log(), for anyone re-investigating this later. This is how the fix in
+    filesystem.py (mode field parsing + filtering out $FILE_NAME attribute rows) was
+    actually derived: a deleted NTFS entry's mode comes back "-/rrwxrwxrwx" (the
+    directory entry is unallocated) rather than FAT/exFAT/HFS+'s "r/r", and NTFS
+    lists a deleted file's $FILE_NAME attribute as a separate, metadata-only row
+    alongside its real $DATA row.
     """
     binaries = FilesystemEngine.locate_binaries()
     assert binaries is not None, "Sleuth Kit tools not found"
 
     volumes = FilesystemEngine.probe(ntfs_volume["vhd_path"])
+    _log(f"\nFilesystemEngine.probe(vhd_path): {volumes}")
     assert volumes, "probe() found no volumes on the NTFS VHD -- mmls/fsstat parsing itself is the problem"
     offset = volumes[0].offset
     vhd_str = str(ntfs_volume["vhd_path"])
@@ -313,19 +308,16 @@ def test_diagnose_ntfs_fls_output(ntfs_volume):
         ("fls -r -p -o <offset> (no -m, no -f, for comparison)",
          [str(binaries["fls"]), "-r", "-p", "-o", str(offset), vhd_str]),
     ]
-    sections = [f"FilesystemEngine.probe(vhd_path): {volumes}"]
     for label, args in invocations:
         proc = subprocess.run(args, capture_output=True, text=True, timeout=60)
         matches = [
             line for line in proc.stdout.splitlines()
             if _JPEG_NAME in line or _DOCX_NAME in line or _PDF_NAME in line
         ]
-        sections.append(
-            f"=== {label} ===\nargs: {args}\nreturncode: {proc.returncode}\n"
-            "lines matching known filenames:\n" + "\n".join(matches) + "\n"
-            f"--- full stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
+        _log(
+            f"\n=== {label} ===\nargs: {args}\nreturncode: {proc.returncode}\n"
+            "lines matching known filenames:\n" + "\n".join(matches)
         )
-    pytest.fail("\n\n".join(sections))
 
 
 # ---------------------------------------------------------------------------

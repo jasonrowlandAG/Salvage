@@ -485,10 +485,29 @@ class FilesystemEngine:
                 m = _FLS_LINE_RE.match(line)
                 if not m:
                     continue
-                if not m.group("mode").startswith("r/r"):
-                    continue  # skip directories (d/d) and virtual entries (v/v, V/V)
+                # mode is "<name-type>/<meta-type><perms...>" (e.g. "r/rrwxrwxrwx" on
+                # NTFS, plain "r/r" on FAT/exFAT/HFS+). The name-type (before the
+                # slash) is the *directory entry*, which NTFS leaves unallocated ("-")
+                # on delete even though the underlying MFT record (the meta-type,
+                # after the slash) is still a perfectly normal "r" regular file --
+                # verified against a real NTFS deletion, where every deleted file's
+                # mode came back "-/rrwxrwxrwx" instead of "r/r...". Deciding "regular
+                # file" from the meta-type alone (not requiring the name-type to also
+                # be "r") is what makes deleted NTFS files show up at all; FAT/exFAT/
+                # HFS+ behaviour is unchanged since their name-type and meta-type
+                # already always agree.
+                _name_type, _, meta_type = m.group("mode").partition("/")
+                if not meta_type.startswith("r"):
+                    continue  # skip directories (d), virtual entries (v/V), etc.
 
                 raw_name = m.group("name")
+                if "($FILE_NAME)" in raw_name:
+                    # NTFS lists a deleted file's $FILE_NAME attribute (pure metadata,
+                    # e.g. size 102 bytes) as a *separate* fls row from its real $DATA
+                    # attribute (the actual file content) -- without this, every NTFS
+                    # file would be "recovered" twice, once as a tiny, wrong-content
+                    # duplicate.
+                    continue
                 deleted = "(deleted" in raw_name
                 if not include_existing and not deleted:
                     continue
