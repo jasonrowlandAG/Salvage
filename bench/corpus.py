@@ -14,16 +14,17 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from pathlib import Path
+
 from PIL import Image
 
-try:
-    import pillow_heif
-
-    pillow_heif.register_heif_opener()
-except ImportError:  # pragma: no cover - pillow-heif is a project dependency
-    pillow_heif = None  # type: ignore[assignment]
-
 DEFAULT_SEED = 20260906
+
+# A real, valid HEIC checked in rather than encoded at build time: Salvage only ever
+# *decodes* HEIC, so the app ships a decode-only libheif (see packaging/THIRD_PARTY.md)
+# and no HEVC encoder is available to generate one. These are the exact bytes the old
+# encoder produced for DEFAULT_SEED, so the DEFAULT_SEED corpus is unchanged.
+HEIC_FIXTURE = Path(__file__).parent / "fixtures" / "sample.heic"
 
 
 @dataclass(frozen=True)
@@ -110,13 +111,13 @@ def _jpeg_bytes(rnd: random.Random, w: int, h: int, quality: int, taken: datetim
 
 
 def _heic_bytes(rnd: random.Random, w: int, h: int) -> bytes:
-    if pillow_heif is None:
-        raise RuntimeError("pillow_heif is required to build the HEIC corpus fixture")
-    data = rnd.randbytes(w * h * 3)
-    img = Image.frombytes("RGB", (w, h), data)
-    buf = io.BytesIO()
-    img.save(buf, format="HEIF", quality=45)
-    return buf.getvalue()
+    """The checked-in HEIC fixture (400x300). Unlike every other builder here the bytes
+    are fixed rather than seeded, because generating one needs an HEVC *encoder* and the
+    app deliberately ships a decode-only libheif. `rnd` is still drawn from by exactly
+    the amount the old encoder-based builder consumed, so every *other* corpus file
+    stays byte-identical to the baseline in bench/results/latest.json."""
+    rnd.randbytes(w * h * 3)
+    return HEIC_FIXTURE.read_bytes()
 
 
 def _png_bytes(rnd: random.Random, w: int, h: int) -> bytes:

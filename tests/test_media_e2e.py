@@ -27,6 +27,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PIL import Image
 
+from bench.corpus import HEIC_FIXTURE
 from salvage.engine import ios_fixtures
 from salvage.engine import local_media as lm
 from salvage.engine import thumbcache
@@ -86,11 +87,10 @@ def _mtime_dated(path: Path, year: int) -> None:
 
 
 def _heic(path: Path, year: int) -> None:
-    import pillow_heif
-
+    # Copied from the checked-in fixture rather than encoded: Salvage ships a decode-only
+    # libheif, so there is no HEVC encoder here any more (packaging/THIRD_PARTY.md).
     path.parent.mkdir(parents=True, exist_ok=True)
-    heif_file = pillow_heif.from_pillow(Image.new("RGB", (20, 20), (10, 20, 30)))
-    heif_file.save(path)
+    path.write_bytes(HEIC_FIXTURE.read_bytes())
     _pad_to(path)
     _mtime_dated(path, year)
 

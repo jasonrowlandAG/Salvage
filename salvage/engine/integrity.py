@@ -37,11 +37,11 @@ except ImportError:  # pragma: no cover - Pillow is a project dependency
     ImageFile = None  # type: ignore[assignment]
 
 try:
-    import pillow_heif
+    import pi_heif
 
-    pillow_heif.register_heif_opener()
-except ImportError:  # pragma: no cover - pillow-heif is a project dependency
-    pillow_heif = None  # type: ignore[assignment]
+    pi_heif.register_heif_opener()
+except ImportError:  # pragma: no cover - pi-heif is a project dependency
+    pi_heif = None  # type: ignore[assignment]
 
 # Above this many bytes, skip a real decode/decompress attempt and fall back to a
 # structural-only verdict (never claim INTACT off a skipped decode - see each
@@ -184,7 +184,7 @@ def _verify_png(path: Path, size: int) -> Verdict:
 
 
 # ---------------------------------------------------------------------------
-# GIF / BMP / TIFF / WebP / HEIC - header sniff + Pillow (pillow_heif for HEIC)
+# GIF / BMP / TIFF / WebP / HEIC - header sniff + Pillow (pi_heif for HEIC)
 # ---------------------------------------------------------------------------
 
 
@@ -238,8 +238,8 @@ def _verify_pillow_image(path: Path, size: int, ext: str) -> Verdict:
     if not check(head):
         return Integrity.CORRUPT, reason
 
-    if ext in ("heic", "heif") and pillow_heif is None:
-        return Integrity.UNKNOWN, "ftyp box present; pillow_heif not available to confirm"
+    if ext in ("heic", "heif") and pi_heif is None:
+        return Integrity.UNKNOWN, "ftyp box present; pi_heif not available to confirm"
 
     if Image is None:
         return Integrity.UNKNOWN, "Pillow not available to confirm"

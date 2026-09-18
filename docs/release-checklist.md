@@ -300,15 +300,18 @@ Ranked by severity, not by section order above:
    needs a decision) and is a product call, not a docs/installer change.
    See `docs/legal-compliance.md`'s "practical, lowest-friction path"
    section for both options.
-2. **x265, bundled inside the pillow-heif wheel, is GPL-2.0** and — because
-   it's dynamically loaded *into the same process* as Salvage's own code
-   (unlike PhotoRec, which is a clean subprocess) — creates a genuinely
-   contested "does this make the combined work GPL" question. Recommended
-   fix: stop shipping x265 (Salvage only decodes HEIC for preview; a
-   decode-only libheif build removes the whole question). Not fixed in
-   this pass — it's an engineering task (rebuild/re-vendor libheif), not a
-   doc change. See `docs/legal-compliance.md` for the full analysis; get a
-   real lawyer's opinion before a *paid* launch if x265 is still bundled.
+2. ~~**x265, bundled inside the pillow-heif wheel, is GPL-2.0**~~ —
+   **fixed 2026-09-18.** The dependency is now `pi-heif`, upstream's
+   decode-only wheel: libheif + libde265 (both LGPLv3), no HEVC encoder.
+   Salvage only ever decodes HEIC, so nothing was lost. Verified on a built
+   bundle (no `x265` file, no `x265` reference in any bundled Mach-O, only
+   `libheif`/`libde265` loaded by the running app) with HEIC preview still
+   working. There is no longer any in-process GPL library in Salvage, and no
+   lawyer review is gating a paid launch on this. See
+   `docs/legal-compliance.md`.
+   *If you ever re-add an encoder:* deleting `libx265.216.dylib` from a
+   pillow-heif build is not a valid shortcut — `libheif` hard-links it and
+   the extension fails to load without it.
 3. **Not notarized.** `packaging/notarize.sh` is written but has never
    run — needs a paid Apple Developer account, a Developer ID certificate,
    and stored notarytool credentials, none of which exist on this machine

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from bench.corpus import HEIC_FIXTURE
 from salvage.engine import thumbcache
 
 
@@ -54,11 +55,12 @@ def test_get_returns_none_when_nothing_cached(tmp_path):
 
 
 def test_ensure_generates_thumbnail_for_heic(tmp_path):
-    pillow_heif = pytest.importorskip("pillow_heif")
+    # A checked-in real HEIC rather than one encoded here: the app ships a decode-only
+    # libheif (no HEVC encoder - see packaging/THIRD_PARTY.md), so nothing in this repo
+    # can encode one any more. importorskip still guards the *decoder* being present.
+    pytest.importorskip("pi_heif")
     heic_path = tmp_path / "photo.heic"
-    img = Image.new("RGB", (600, 400), (200, 30, 30))
-    heif_file = pillow_heif.from_pillow(img)
-    heif_file.save(heic_path, quality=80)
+    heic_path.write_bytes(HEIC_FIXTURE.read_bytes())
 
     result = thumbcache.ensure(heic_path)
 

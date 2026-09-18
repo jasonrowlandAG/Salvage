@@ -15,6 +15,40 @@ macOS (see `docs/release-checklist.md`).
 
 ## [Unreleased]
 
+### Removed — the GPLv2 x265 encoder is no longer bundled (2026-09-18)
+- Replaced the `pillow-heif` dependency with `pi-heif`, upstream's own
+  decode-only wheel of the same project. pillow-heif's prebuilt wheel
+  bundled `libx265` — an HEVC **encoder** under GPLv2 — which made
+  pillow-heif document its whole compiled wheel as GPL-2.0 and, because it
+  loaded in-process via Python's C-extension mechanism, raised a genuinely
+  contested question about whether the combined, running Salvage.app was a
+  GPL-covered work (`docs/legal-compliance.md`). Salvage only ever *decodes*
+  HEIC — for photo thumbnails and previews — so the encoder was dead weight.
+  `pi-heif` bundles only libheif and libde265, both LGPLv3, which is the
+  same regime Salvage already satisfies for PySide6/Qt. The bundle now
+  contains no in-process GPL library at all; PhotoRec (GPLv2, a clean
+  subprocess) is the only GPL component left.
+  Verified on a real build: no `x265` file anywhere in `dist/Salvage.app`,
+  no `x265` reference in any bundled Mach-O, only `_pi_heif…so`/`libheif`/
+  `libde265` loaded by the running app, and HEIC preview still renders (grid
+  thumbnail plus full preview, correct dimensions read via the decoder).
+  Note for anyone tempted by the cheaper fix: simply deleting
+  `libx265.216.dylib` from a pillow-heif build does **not** work — `libheif`
+  hard-links it (`@loader_path/libx265.216.dylib`) and the extension then
+  fails to load, silently disabling HEIC decoding.
+
+### Changed — HEIC test fixtures no longer encoded at test time (2026-09-18)
+- `bench/fixtures/sample.heic`: a real HEIC checked into the repo. Because
+  the project no longer ships an HEVC encoder, `bench/corpus.py`,
+  `tests/test_integrity.py`, `tests/test_media_e2e.py` and
+  `tests/test_thumbcache.py` read this fixture instead of encoding one.
+  These are the exact bytes the old encoder produced for `DEFAULT_SEED`, and
+  `_heic_bytes` still draws the same amount from the seeded RNG, so
+  `build_corpus(DEFAULT_SEED)` remains byte-identical across all 20 files
+  and `bench/results/latest.json` stays a valid baseline (verified by
+  diffing the corpus hashes before and after). The corpus HEIC is now
+  fixed rather than seed-varying; every other corpus file still varies.
+
 ### Added — packaging, licensing and release infrastructure (2026-09-18)
 - `packaging/make_dmg.sh`: builds a compressed, signed, read-only
   `Salvage-<version>.dmg` with an `/Applications` shortcut and a generated
@@ -33,7 +67,8 @@ macOS (see `docs/release-checklist.md`).
   platforms, first-run experience, privacy, and smoke testing.
 - `packaging/THIRD_PARTY.md`: completed with full license texts, precise
   per-component obligations, and a written offer of source for the
-  GPL-licensed components.
+  GPL-licensed components (as of the x265 removal above, that offer covers
+  PhotoRec/TestDisk alone).
 - `CHANGELOG.md` (this file).
 
 ### Changed — packaging, licensing and release infrastructure (2026-09-18)

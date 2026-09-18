@@ -7,7 +7,7 @@ scratch. Never call `ensure()` on a `FoundMedia.cloud_placeholder` item — the 
 actually on disk yet and reading it would trigger an iCloud download.
 
 Generation order per file:
-1. Pillow (+ pillow_heif for HEIC/HEIF, and whatever RAW plugins are installed) for images.
+1. Pillow (+ pi_heif for HEIC/HEIF, and whatever RAW plugins are installed) for images.
 2. macOS QuickLook (`qlmanage -t`) for videos and anything Pillow can't open — this is the
    only practical way to get a frame out of most consumer video codecs without a full
    ffmpeg dependency, and QuickLook already knows how to preview them.
@@ -30,9 +30,13 @@ import tempfile
 from pathlib import Path
 
 try:
-    import pillow_heif
+    # pi-heif, not pillow-heif: same upstream project and the same decode API, but its
+    # wheel bundles only libheif + libde265 (decode) and no x265 HEVC *encoder*, which
+    # keeps the whole bundle off GPLv2. Salvage never writes HEIC, so the encoder was
+    # dead weight. See packaging/THIRD_PARTY.md.
+    import pi_heif
 
-    pillow_heif.register_heif_opener()
+    pi_heif.register_heif_opener()
 except ImportError:  # pragma: no cover - exercised only when the dep is missing
     pass
 
@@ -48,7 +52,7 @@ CACHE_DIR = Path.home() / "Library" / "Caches" / "Salvage" / "thumbs"
 # Extensions QuickLook is worth trying for (Pillow can't open these).
 _QUICKLOOK_EXTS = {
     "mov", "mp4", "m4v", "avi", "mkv", "3gp", "3g2",
-    "heic", "heif",  # tried only if Pillow/pillow_heif failed to open them
+    "heic", "heif",  # tried only if Pillow/pi_heif failed to open them
 }
 
 
@@ -229,7 +233,7 @@ def _ensure_sized(path: Path, render_size: int) -> Path | None:
         if _generate_with_pillow(path, dest, max_size=render_size):
             return dest
     else:
-        # Still worth a Pillow attempt for HEIC/HEIF when pillow_heif is present.
+        # Still worth a Pillow attempt for HEIC/HEIF when pi_heif is present.
         if ext in ("heic", "heif") and _generate_with_pillow(path, dest, max_size=render_size):
             return dest
 

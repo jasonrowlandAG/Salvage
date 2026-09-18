@@ -3,7 +3,7 @@
 Three states, switched on the selected item's category:
 
 * **image** — the panel's own area, scaled to fit and re-scaled on resize, backed by
-  `thumbcache`'s persistent cache (Pillow/pillow_heif, falling back to QuickLook for RAW
+  `thumbcache`'s persistent cache (Pillow/pi_heif, falling back to QuickLook for RAW
   and anything else Pillow can't open). A small "Open full size" button (or a
   double-click) opens a separate, resizable window with fit/100% toggle, mouse-wheel
   zoom, and drag-to-pan.

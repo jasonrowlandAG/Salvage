@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "PySide6>=6.8",
     "pillow>=10",
-    "pillow-heif>=0.18",
+    "pi-heif>=1.4",  # decode-only sibling of pillow-heif: no x265/GPLv2 in the wheel
     "pycryptodome>=3.20",
 ]
 

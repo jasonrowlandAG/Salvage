@@ -34,9 +34,9 @@ from salvage.engine.ios import BackupPasswordError, BackupReader
 from salvage.engine.models import CATEGORY_BY_EXT, Category, category_for
 
 try:
-    import pillow_heif
+    import pi_heif
 
-    pillow_heif.register_heif_opener()
+    pi_heif.register_heif_opener()
 except ImportError:  # pragma: no cover - exercised only when the dep is missing
     pass
 

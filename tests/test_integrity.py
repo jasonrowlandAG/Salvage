@@ -178,7 +178,7 @@ def test_pillow_image_family(tmp_path, pillow_fmt, ext):
 
 
 # ---------------------------------------------------------------------------
-# HEIC (real file via pillow_heif)
+# HEIC (real file from bench/fixtures/sample.heic)
 # ---------------------------------------------------------------------------
 
 
