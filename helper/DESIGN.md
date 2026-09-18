@@ -95,7 +95,8 @@ a mounted volume, and the raw *container* underneath is FileVault ciphertext.**
 - Switch the wire protocol from a bare Unix socket to XPC
   (`NSXPCConnection` + a `MachServices` entry in the plist) for proper
   request auth and structured errors instead of raw bytes — the spike's
-  socket protocol was intentionally minimal.
+  socket protocol was intentionally minimal. **Done — see "Authorisation
+  model" below.**
 - Do NOT attempt to carve the live internal Data volume — it is blocked at
   the kernel level and, even if it weren't, the underlying bytes are
   encrypted. Scope internal-disk recovery to: (a) already-unmounted
@@ -109,3 +110,81 @@ a mounted volume, and the raw *container* underneath is FileVault ciphertext.**
   item added" notification fires reliably, then poll
   `SMAppService.status`/`sfltool dumpbtm` rather than blocking the UI
   thread.
+
+## Authorisation model (implemented 2026-09-18)
+
+The spike's transport was a Unix socket at `/var/run/com.salvage.helper.sock`,
+root:admin 0660, carrying line-delimited JSON. That authenticated nobody:
+Unix-domain-socket permissions are enforced against the *connecting* process's
+credentials, so on the ordinary single-admin-user Mac every app the user runs
+could ask a root daemon to read arbitrary raw disk bytes — around filesystem
+permissions entirely. `docs/security-review.md` §7 rates that HIGH only because
+the component is dormant, and CRITICAL the day it ships. The socket is gone.
+
+**Transport.** `NSXPCConnection` over the launchd Mach service
+`com.salvage.helper` (`MachServices` in the plist). One method:
+
+```swift
+func readRawDevice(device: String, offset: UInt64, length: Int,
+                   withReply reply: @escaping (Int32, Data?) -> Void)
+```
+
+`status` is 0, or a negative errno: `-EINVAL` malformed, `-EACCES` refused by
+policy, `-EAGAIN` when `diskutil` could not be consulted.
+
+**Who may connect.** Every connection is checked in
+`NSXPCListenerDelegate.listener(_:shouldAcceptNewConnection:)` before the
+interface is exported. The peer's code signature must satisfy a requirement
+built at startup from the *helper's own* signature:
+
+- signed with a Team ID → `identifier "com.salvage.app" and anchor apple
+  generic and certificate leaf[subject.OU] = "<team>"`
+- self-signed, no Team ID (the "Salvage Dev" case this spike actually uses) →
+  `identifier "com.salvage.app" and certificate leaf = H"<leaf SHA-1>"`
+- ad-hoc signed → **no requirement can be derived, so every connection is
+  refused.** An ad-hoc signature pins nothing. `packaging/build_mac.sh` warns
+  when it falls back to ad-hoc signing for exactly this reason.
+
+Deriving the requirement at runtime rather than hardcoding it is what lets a
+self-signed build work at all: the certificate differs per developer machine,
+and `build_mac.sh` already signs the app and the helper with the same identity.
+
+*Known limitation:* the peer is resolved by `connection.processIdentifier` via
+`kSecGuestAttributePid`, which is in principle open to a PID-reuse race. There
+is no public API that hands an XPC connection's audit token to the server
+(`NSXPCConnection.auditToken` exists but is not API). This is the fix the
+security review asked for and is a different order of protection from "any
+admin-group process", but it is worth revisiting if Apple ships a supported
+audit-token accessor.
+
+**What may be asked for.** `device` is no longer passed to `open()` as given.
+It must parse as exactly a whole-disk or partition node (`/dev/disk3s1`,
+`/dev/rdisk3s1` — nothing else, no traversal, no trailing junk), must be a
+device `diskutil list` currently knows about, and must be unmounted *through
+the whole stack above it*:
+
+- the device itself has no mount point and no mounted snapshot, **and**
+- nothing layered on top of it is mounted — a whole disk whose partition is
+  mounted, or an APFS physical store whose container has a mounted volume, is
+  in use even though it reports no mount point of its own.
+
+That second rule is what refuses `/dev/rdisk0` and `/dev/rdisk3`, both of which
+this spike's own test log (§6 above) records as *successful* root reads. They
+are the live startup disk seen from one level down, and reading them was only
+ever going to yield the FileVault ciphertext §7 measured. Refusing them matches
+the scope this document already set: unmounted volumes only.
+
+The path finally opened is rebuilt from the validated identifier rather than
+reused from the request, and `length` must be in 1…64 MiB — the spike passed it
+straight to `Data(count:)`. The inventory is re-read per request, because a
+device that was unmounted when the connection opened may have been mounted
+since.
+
+**Tests.** `helper/run-tests.sh` (21 tests, swift-testing — Command Line Tools
+ship `Testing.framework` but no XCTest, and the script points `swift test` at
+it). Covers device-path parsing against hostile inputs, the in-use rules
+including the container/physical-store case above, the length bounds, and the
+requirement-string builder. The peer check has both a negative test and a
+positive control, so a `SecCode` lookup that silently never worked would fail
+the suite rather than pass it. `build_mac.sh` runs the suite before it will
+embed the daemon.

@@ -305,7 +305,7 @@ algorithm). The full suite (`pytest`) was green after every commit.
 | # | Finding | Status | What changed | Covering test(s) |
 |---|---|---|---|---|
 | 1 | CRITICAL — `--rawtest` command injection | **Fixed** (prior to this pass) | `_raw_read_test`/`--rawtest` removed from `salvage/__main__.py` | — |
-| 2 | HIGH — `helper/` SMAppService daemon, no peer auth | **Deferred / accepted for now** | Not touched this pass — see reasoning below | — |
+| 2 | HIGH — `helper/` SMAppService daemon, no peer auth | **Fixed** (follow-up pass, same day) | Unix socket replaced with `NSXPCConnection` over a launchd `MachServices` entry; every connection's peer must satisfy a code requirement derived from the helper's own signature (`identifier "com.salvage.app"` + Team ID, or + pinned leaf certificate for the self-signed build; ad-hoc builds derive nothing and refuse every connection); `device` must parse as a bare disk/partition node that `diskutil` reports unmounted through the whole stack above it (so `/dev/rdisk0` and `/dev/rdisk3`, which the spike log records as successful root reads, are now refused); `length` bounded to 64 MiB. See `helper/DESIGN.md` → "Authorisation model" | `helper/run-tests.sh` (21 tests; peer check has a positive control as well as negative cases) |
 | 3 | HIGH — `sqlite_recover.recover_records()` hostile page_count DoS | **Fixed** | Page count is now clamped to the file's real size and a hard `_MAX_PAGE_SCAN_BUDGET` (200,000 pages); declared page size is validated against real SQLite page sizes; an optional `cancel` event is polled and stops the scan early | `tests/test_ios_parsers.py::test_recover_records_bounds_hostile_page_count_in_sparse_file`, `::test_recover_records_honours_cancel_event` |
 | 4 | MEDIUM — PATH-resolved tool binaries used before elevation | **Fixed** | `photorec.py`/`filesystem.py`/`ios.py` now resolve bundled → fixed system dirs → PATH last, via new `privileged.resolve_trusted_binary()`; a PATH-only match is refused for an elevated run unless root-owned/non-writable, via new `privileged.require_safe_for_elevation()`. Also fixes the packaging bug where a frozen build preferred Homebrew's `photorec` over its own bundled copy | `tests/test_privileged.py` (resolve_trusted_binary/require_safe_for_elevation cases), `tests/test_engine.py::test_resolve_binary_never_reports_a_bare_path_match_when_a_fixed_dir_has_it`, `::test_scan_refuses_elevation_for_untrusted_path_resolved_binary` |
 | 5 | MEDIUM — decrypted `Manifest.db` cache world-readable, never deleted | **Fixed** | `BackupReader` now writes the decrypted cache into a fresh `tempfile.mkdtemp()` directory (0700) with the file opened at 0600 at creation, not a sibling of the user-chosen backup folder; deleted in `close()` (now also a context manager); `cleanup_stale_ios_caches()` added and called once at app startup as a best-effort sweep of anything left by a prior crash. All four existing call sites already `close()` in a `finally` block, so cleanup now happens automatically with no UI changes needed | `tests/test_ios.py::test_backup_reader_decrypted_manifest_cache_is_private_and_not_beside_backup_dir`, `::test_backup_reader_decrypted_manifest_cache_deleted_via_context_manager`, `::test_cleanup_stale_ios_caches_removes_leftover_cache_dirs_only` |
@@ -315,16 +315,15 @@ algorithm). The full suite (`pytest`) was green after every commit.
 | 9 | LOW — `fake.py` predictable `/tmp` paths | **Accepted, not fixed** | Only reachable via the opt-in `SALVAGE_FAKE=1` dev/demo mode, writes synthetic fixture data (not a real user's personal data), and is never part of the default/shipped path. Judged not worth the churn of changing fixture paths that other dev tooling may depend on | — |
 | 10 | LOW — thumbnail cache never expires/scopes by source | **Partially mitigated** | Cache directory/file permissions tightened to 0700/0600 at creation (`thumbcache.py`), closing the access-control-adjacent part. Expiry/scoping itself is a data-hygiene nicety, not an access-control gap (normal home-directory permissions already keep other local users out) — left as a future enhancement (e.g. a "clear thumbnail cache" action), not a security fix | `tests/test_thumbcache.py` (existing suite; permissions covered by manual inspection of the new `os.chmod` calls, no dedicated new test since existing tests don't assert on filesystem mode bits) |
 
-**On #2 (helper daemon, HIGH):** not fixed in this pass. Reasoning: it's
-Swift code under `helper/`, a separate codebase from this pass's
-`salvage/engine/` (Python) scope; it is not built or embedded in the shipped
-app by default (`SALVAGE_BUILD_HELPER=0`) and is never auto-registered
-(`DESIGN.md`'s own registration step is a manual, one-time CLI action) — so
-there is no exposure in what actually ships today. The review's own
-recommended fix (switch to `NSXPCConnection` with code-signature peer
-verification, add a device-path allowlist, bound `length`) is a real design
-change, not a quick patch, and its own framing is "before this ever leaves
-prototype status" rather than an urgent same-day fix. Flagged as a follow-up
-task (XPC peer auth for the helper daemon) rather than silently dropped —
-**this must land before `SALVAGE_BUILD_HELPER=1` or helper registration is
-ever enabled for a release build.**
+**On #2 (helper daemon, HIGH):** fixed in a follow-up pass on the same day,
+before any of the conditions that would make it live. The component is still
+gated behind `SALVAGE_BUILD_HELPER=1` (default `0`) and still never
+auto-registered, so this remains a change to dormant code — but the gate that
+mattered ("this must land before `SALVAGE_BUILD_HELPER=1` or helper
+registration is ever enabled for a release build") is now satisfied rather
+than outstanding. The one carried-over limitation, recorded in `DESIGN.md`:
+the peer is resolved by PID (`kSecGuestAttributePid`), which is in principle
+open to a PID-reuse race, because no public API hands an XPC connection's
+audit token to the server. That is the fix this review asked for, and a
+different order of protection from the socket's "any admin-group process"
+gate, but it is not the last word on the subject.

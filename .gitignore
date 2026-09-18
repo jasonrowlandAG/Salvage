@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 dist/
 build/
+.build/
 *.egg-info/
 photorec.se*
 photorec.log

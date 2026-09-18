@@ -68,23 +68,31 @@ IDENTITY="${SALVAGE_SIGN_IDENTITY:-Salvage Dev}"
 # The SMAppService root helper (helper/DESIGN.md) is a proven prototype but is not
 # wired into scanning: the kernel refuses raw reads of mounted volumes regardless of
 # privilege, so it buys nothing for the internal disk. Opt in with SALVAGE_BUILD_HELPER=1.
-if [ "${SALVAGE_BUILD_HELPER:-0}" = "1" ] && command -v swiftc >/dev/null 2>&1; then
+if [ "${SALVAGE_BUILD_HELPER:-0}" = "1" ] && command -v swift >/dev/null 2>&1; then
     echo "==> Building SalvageHelper (SMAppService daemon) + salvage-register CLI"
-    mkdir -p helper/build
-    swiftc -O helper/SalvageHelper/main.swift -o helper/build/SalvageHelper
-    swiftc -O helper/salvage-register/main.swift -o helper/build/salvage-register
+    # The helper's authorisation policy is unit-tested; a build that embeds the
+    # daemon must not ship past a failing one.
+    helper/run-tests.sh
+    swift build --package-path helper -c release
     mkdir -p "$APP/Contents/Library/LaunchDaemons"
-    cp helper/build/SalvageHelper "$APP/Contents/MacOS/SalvageHelper"
-    cp helper/build/salvage-register "$APP/Contents/MacOS/salvage-register"
+    cp helper/.build/release/SalvageHelper "$APP/Contents/MacOS/SalvageHelper"
+    cp helper/.build/release/salvage-register "$APP/Contents/MacOS/salvage-register"
     cp helper/com.salvage.helper.plist "$APP/Contents/Library/LaunchDaemons/com.salvage.helper.plist"
     chmod +x "$APP/Contents/MacOS/SalvageHelper" "$APP/Contents/MacOS/salvage-register"
     # The daemon and CLI must carry the same signing identity as the app itself
     # (SMAppService checks this); sign them now, then the --deep sign below reseals
     # the whole bundle including these new files.
+    #
+    # The identity matters twice over: the daemon pins the XPC peer to whatever
+    # certificate signed the daemon itself, so an ad-hoc build cannot talk to its
+    # own helper at all (it refuses every connection by design — see
+    # helper/SalvageHelperCore/PeerAuthorisation.swift).
     if security find-identity -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""; then
         codesign --force --sign "$IDENTITY" "$APP/Contents/MacOS/SalvageHelper"
         codesign --force --sign "$IDENTITY" "$APP/Contents/MacOS/salvage-register"
     else
+        echo "warning: no '$IDENTITY' identity in keychain; the ad-hoc-signed helper" >&2
+        echo "         will refuse every XPC connection (nothing to pin the peer to)." >&2
         codesign --force --sign - "$APP/Contents/MacOS/SalvageHelper"
         codesign --force --sign - "$APP/Contents/MacOS/salvage-register"
     fi

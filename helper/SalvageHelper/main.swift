@@ -1,24 +1,25 @@
-// SalvageHelper — spike daemon.
+// SalvageHelper — root daemon registered via SMAppService.
 //
-// Listens on a Unix domain socket and, on request, opens a raw block device
-// and reads back N bytes from an offset. The ONLY question this spike answers:
-// does a root daemon registered via SMAppService (signed with the same
-// self-signed "Salvage Dev" identity as Salvage.app, no Team ID) inherit the
-// app's Full Disk Access when it opens /dev/rdiskN? See helper/DESIGN.md.
+// Reads raw bytes off a block device on behalf of Salvage.app, which cannot do
+// it itself (see helper/DESIGN.md for what that privilege does and does not
+// buy). The raw-read mechanic is unchanged from the spike; what changed is who
+// is allowed to ask and what they are allowed to ask for:
 //
-// Wire protocol (line-delimited JSON request, binary response):
-//   request:  {"device":"/dev/rdisk3s1","offset":0,"length":1048576}\n
-//   response: 4-byte little-endian Int32 status (0 = ok, else -errno)
-//             followed by, if status == 0, an 8-byte little-endian UInt64
-//             byte count and then that many raw bytes.
+//   * transport is NSXPCConnection over a launchd MachService, not a
+//     root:admin 0660 Unix socket that any admin-group process could open;
+//   * every connection's peer is checked against a code requirement derived
+//     from the helper's own signature, so only Salvage.app gets served;
+//   * `device` must name a whole disk or partition that diskutil currently
+//     reports as unmounted, top to bottom (see DeviceAllowlist.swift);
+//   * `length` is bounded.
 //
-// This is NOT the final design (see DESIGN.md) — no XPC, no auth, no
-// PhotoRec invocation. It exists only to prove or disprove the TCC question.
+// Anything that fails those checks gets a negative errno and a log line; the
+// device is never opened.
 
 import Darwin
 import Foundation
+import SalvageHelperCore
 
-let socketPath = "/var/run/com.salvage.helper.sock"
 let logPath = "/var/log/salvage-helper.log"
 
 func log(_ message: String) {
@@ -63,97 +64,119 @@ func readRawDevice(path: String, offset: UInt64, length: Int) -> (Int32, Data) {
     return (0, buffer.prefix(bytesRead))
 }
 
-func handleClient(_ clientFd: Int32) {
-    defer { close(clientFd) }
-
-    var lineData = Data()
-    var byte: UInt8 = 0
-    while true {
-        let n = read(clientFd, &byte, 1)
-        if n <= 0 { break }
-        if byte == 0x0A { break } // \n
-        lineData.append(byte)
+/// Current device inventory, re-read per request: a device that was unmounted
+/// when the connection opened may have been mounted since.
+func currentDiskInventory() -> DiskInventory? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/sbin/diskutil")
+    process.arguments = ["list", "-plist"]
+    let output = Pipe()
+    process.standardOutput = output
+    process.standardError = FileHandle.nullDevice
+    do {
+        try process.run()
+    } catch {
+        log("diskutil could not be run: \(error)")
+        return nil
     }
-
-    guard !lineData.isEmpty,
-          let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-          let device = json["device"] as? String,
-          let offsetNum = json["offset"] as? NSNumber,
-          let lengthNum = json["length"] as? NSNumber
-    else {
-        log("bad request: \(String(data: lineData, encoding: .utf8) ?? "<binary>")")
-        var status: Int32 = -EINVAL
-        withUnsafeBytes(of: &status) { _ = write(clientFd, $0.baseAddress, 4) }
-        return
+    let data = output.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        log("diskutil list -plist exited \(process.terminationStatus)")
+        return nil
     }
+    do {
+        return try DiskInventory(diskutilPlist: data)
+    } catch {
+        log("diskutil output could not be parsed: \(error)")
+        return nil
+    }
+}
 
-    let offset = offsetNum.uint64Value
-    let length = lengthNum.intValue
-
-    let (status, data) = readRawDevice(path: device, offset: offset, length: length)
-
-    var statusLE = status.littleEndian
-    withUnsafeBytes(of: &statusLE) { _ = write(clientFd, $0.baseAddress, 4) }
-    if status == 0 {
-        var countLE = UInt64(data.count).littleEndian
-        withUnsafeBytes(of: &countLE) { _ = write(clientFd, $0.baseAddress, 8) }
-        data.withUnsafeBytes { raw in
-            var offset = 0
-            while offset < raw.count {
-                let n = write(clientFd, raw.baseAddress!.advanced(by: offset), raw.count - offset)
-                if n <= 0 { break }
-                offset += n
-            }
+final class HelperService: NSObject, SalvageHelperProtocol {
+    func readRawDevice(
+        device: String,
+        offset: UInt64,
+        length: Int,
+        withReply reply: @escaping (Int32, Data?) -> Void
+    ) {
+        guard isReadLengthAllowed(length) else {
+            log("refused: length \(length) outside 1...\(HelperConstants.maxReadLength)")
+            reply(-EINVAL, nil)
+            return
         }
+        guard let inventory = currentDiskInventory() else {
+            reply(-EAGAIN, nil)
+            return
+        }
+        switch authoriseDevicePath(device, inventory: inventory) {
+        case .failure(let error):
+            log("refused \(device): \(error)")
+            reply(error == .malformedPath ? -EINVAL : -EACCES, nil)
+        case .success(let path):
+            let (status, data) = SalvageHelper.readRawDevice(
+                path: path, offset: offset, length: length)
+            reply(status, status == 0 ? data : nil)
+        }
+    }
+}
+
+final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
+    private let requirement: String?
+
+    init(requirement: String?) {
+        self.requirement = requirement
+    }
+
+    func listener(
+        _ listener: NSXPCListener,
+        shouldAcceptNewConnection connection: NSXPCConnection
+    ) -> Bool {
+        guard let requirement else {
+            log("rejecting connection from pid \(connection.processIdentifier): "
+                + "helper is not signed with a pinnable identity")
+            return false
+        }
+        let pid = connection.processIdentifier
+        guard isPeerAuthorised(processIdentifier: pid, requirement: requirement) else {
+            log("rejecting connection from pid \(pid): does not satisfy \(requirement)")
+            return false
+        }
+
+        connection.exportedInterface = NSXPCInterface(with: SalvageHelperProtocol.self)
+        connection.exportedObject = HelperService()
+        connection.resume()
+        log("accepted connection from pid \(pid)")
+        return true
     }
 }
 
 func runServer() {
     log("SalvageHelper starting, pid=\(getpid()) uid=\(getuid()) euid=\(geteuid())")
 
-    unlink(socketPath)
-
-    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-    guard fd >= 0 else {
-        log("socket() failed errno=\(errno)")
-        exit(1)
+    let identity = OwnSigningIdentity.current()
+    let requirement = identity.flatMap {
+        peerRequirementString(
+            expectedIdentifier: HelperConstants.clientBundleIdentifier,
+            teamIdentifier: $0.teamIdentifier,
+            leafCertificateSHA1Hex: $0.leafCertificateSHA1Hex
+        )
+    }
+    if let requirement {
+        log("peer requirement: \(requirement)")
+    } else {
+        // Fail closed. An ad-hoc signature pins nothing, so there is no way to
+        // tell Salvage.app apart from any other process claiming to be it.
+        log("WARNING: no peer requirement could be derived from this helper's "
+            + "own signature (ad-hoc signed?). All connections will be refused.")
     }
 
-    var addr = sockaddr_un()
-    addr.sun_family = sa_family_t(AF_UNIX)
-    let pathBytes = Array(socketPath.utf8CString)
-    withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-        ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dest in
-            for (i, c) in pathBytes.enumerated() { dest[i] = c }
-        }
-    }
-
-    let bindResult = withUnsafePointer(to: &addr) { ptr -> Int32 in
-        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-            bind(fd, sa, socklen_t(MemoryLayout<sockaddr_un>.size))
-        }
-    }
-    guard bindResult == 0 else {
-        log("bind() failed errno=\(errno)")
-        exit(1)
-    }
-
-    // root:admin 660 per the spike spec.
-    chmod(socketPath, 0o660)
-    chown(socketPath, 0, 80) // 80 = admin group
-
-    guard listen(fd, 5) == 0 else {
-        log("listen() failed errno=\(errno)")
-        exit(1)
-    }
-
-    log("listening on \(socketPath)")
-
-    while true {
-        let clientFd = accept(fd, nil, nil)
-        if clientFd < 0 { continue }
-        handleClient(clientFd)
-    }
+    let listener = NSXPCListener(machServiceName: HelperConstants.machServiceName)
+    let delegate = ListenerDelegate(requirement: requirement)
+    listener.delegate = delegate
+    listener.resume()
+    log("listening on Mach service \(HelperConstants.machServiceName)")
+    dispatchMain()
 }
 
 runServer()
