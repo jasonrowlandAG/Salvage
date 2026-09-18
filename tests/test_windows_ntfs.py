@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -115,6 +116,25 @@ def _verify_volume_via_powershell(letter: str) -> str:
     return info
 
 
+def _query_disable_delete_notify() -> int | None:
+    """Reads the machine-wide DisableDeleteNotify setting (0 = TRIM/UNMAP enabled,
+    1 = disabled), so the fixture can restore whatever it found afterwards."""
+    proc = subprocess.run(
+        ["fsutil", "behavior", "query", "DisableDeleteNotify"], capture_output=True, text=True, timeout=30
+    )
+    _log(f"\nfsutil behavior query DisableDeleteNotify: rc={proc.returncode}\n{proc.stdout}{proc.stderr}")
+    m = re.search(r"=\s*(\d+)", proc.stdout)
+    return int(m.group(1)) if m else None
+
+
+def _set_disable_delete_notify(value: int) -> None:
+    proc = subprocess.run(
+        ["fsutil", "behavior", "set", "DisableDeleteNotify", str(value)],
+        capture_output=True, text=True, timeout=30,
+    )
+    _log(f"\nfsutil behavior set DisableDeleteNotify {value}: rc={proc.returncode}\n{proc.stdout}{proc.stderr}")
+
+
 def _make_minimal_docx(blob_size: int = _DOCX_BLOB_SIZE) -> bytes:
     """A genuinely valid (if minimal) OOXML .docx -- enough for PhotoRec's zip-
     signature carving and a real zipfile round-trip, not a full Word doc. Embeds an
@@ -200,72 +220,45 @@ def _build_ntfs_volume(tmp_path_factory) -> dict:
     volume_info = _verify_volume_via_powershell(letter)
     _log(f"\nGet-Volume -DriveLetter {letter}:\n{volume_info}")
 
+    # NTFS issues delete notifications (TRIM/UNMAP) that a diskpart-attached VHD
+    # honours -- the backing blocks get discarded and read back as zeros, the exact
+    # phenomenon README.md already documents for real SSDs. That makes deleted-file
+    # recovery genuinely impossible on any TRIM-capable volume, which is most modern
+    # Windows machines with SSDs -- a real, honest product limitation, not something
+    # to work around in the engine (confirmed empirically: FilesystemEngine/PhotoRec
+    # were reading back correctly-sized, correctly-located, all-zero clusters -- the
+    # content was gone, not misread). This fixture disables delete notifications for
+    # the plant/delete window specifically *so there is something for the engine to
+    # recover at all*, then always restores whatever value it found: this is a
+    # machine-wide setting, and even on a throwaway CI runner it shouldn't be left
+    # changed.
+    original_trim_setting = _query_disable_delete_notify()
+    _set_disable_delete_notify(1)
     try:
-        jpeg_dir = mount.joinpath(*_JPEG_DIR_PARTS)
-        jpeg_dir.mkdir(parents=True, exist_ok=True)
-        jpeg_path = jpeg_dir / _JPEG_NAME
-        # Random pixel noise (not a flat colour) so JPEG's DCT can't compress it away
-        # to a resident-sized file; 600x450 lands comfortably in the hundreds-of-KB
-        # range regardless of quality settings.
-        Image.frombytes("RGB", (600, 450), os.urandom(600 * 450 * 3)).save(jpeg_path, "JPEG", quality=90)
-        jpeg_bytes = jpeg_path.read_bytes()
-        _log(f"\njpeg size: {len(jpeg_bytes)} bytes")
-
-        doc_dir = mount.joinpath(*_DOC_DIR_PARTS)
-        doc_dir.mkdir(parents=True, exist_ok=True)
-        docx_path = doc_dir / _DOCX_NAME
-        docx_bytes = _make_minimal_docx()
-        docx_path.write_bytes(docx_bytes)
-        _log(f"docx size: {len(docx_bytes)} bytes")
-
-        pdf_path = doc_dir / _PDF_NAME
-        pdf_bytes = b"%PDF-1.4\n" + _PDF_MARKER + b"\n" + (b"%" + b"x" * 78 + b"\n") * (_PDF_PAD_SIZE // 80)
-        pdf_path.write_bytes(pdf_bytes)
-        _log(f"pdf size: {len(pdf_bytes)} bytes")
-
-        planted = sorted(str(p.relative_to(mount)) for p in mount.rglob("*") if p.is_file())
-        _log(f"\nplanted on {mount} before delete: {planted}")
-        assert len(planted) == 3, f"expected 3 planted files on {mount}, found {planted}"
-
-        # Delete two of the three; the pdf stays live, mirroring test_filesystem.py's
-        # "one never-deleted file must NOT show up in the default deleted-only scan"
-        # assertion.
-        jpeg_path.unlink()
-        docx_path.unlink()
-
-        remaining = sorted(str(p.relative_to(mount)) for p in mount.rglob("*") if p.is_file())
-        _log(f"remaining on {mount} after delete: {remaining}")
-        assert remaining == [str(Path(*_DOC_DIR_PARTS) / _PDF_NAME)]
-
-        # Explicitly flush the volume's cached writes before detaching -- diskpart's
-        # own "detach vdisk" is a controlled dismount and should already do this, but
-        # this makes it an explicit, checkable step rather than an assumption.
-        flush_proc = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", f"Write-VolumeCache -DriveLetter {letter}"],
-            capture_output=True, text=True, timeout=30,
-        )
-        _log(f"\nWrite-VolumeCache -DriveLetter {letter}: rc={flush_proc.returncode}\n{flush_proc.stdout}{flush_proc.stderr}")
+        jpeg_bytes, docx_bytes, pdf_bytes = _plant_and_delete_ntfs_files(mount, letter)
     finally:
+        if original_trim_setting is not None:
+            _set_disable_delete_notify(original_trim_setting)
         detach_script = f'select vdisk file="{vhd_str}"\r\ndetach vdisk\r\nexit\r\n'
         detach_proc = _run_diskpart(detach_script)
         _log(f"\ndiskpart detach stdout:\n{detach_proc.stdout}\nstderr:\n{detach_proc.stderr}")
 
     # Isolate fixture-vs-engine failures before any engine ever touches this file:
-    # search the VHD's own raw bytes for the deleted JPEG's signature and the PDF's
-    # (still-live, so definitely present) unique marker. If either is missing here,
-    # the planted content never made it into the VHD's data area at all -- a fixture
-    # bug, not something FilesystemEngine/PhotoRec could ever have recovered -- and
+    # search the VHD's own raw bytes for the deleted JPEG's and DOCX's *entire*
+    # content, not just a signature -- a 3-byte JPEG SOI marker turns up by
+    # coincidence elsewhere on the volume (including inside other live files), so it
+    # doesn't actually prove the content survived, only that *something* looks
+    # JPEG-ish. If either full file is missing here, the content never made it into
+    # the VHD's data area (or was discarded, e.g. by TRIM) -- a fixture/environment
+    # issue, not something FilesystemEngine/PhotoRec could ever have recovered -- and
     # this fails right here with that verdict instead of three confusing engine-level
     # "recovered nothing" failures downstream.
     raw = vhd_path.read_bytes()
-    jpeg_magic_present = b"\xff\xd8\xff" in raw
-    marker_present = _PDF_MARKER in raw
-    _log(
-        f"\nraw VHD byte scan ({len(raw)} bytes): JPEG SOI marker present={jpeg_magic_present}, "
-        f"PDF marker present={marker_present}"
-    )
-    assert jpeg_magic_present, "JPEG signature not found anywhere in the raw VHD file -- fixture wrote nothing recoverable"
-    assert marker_present, "PDF marker not found anywhere in the raw VHD file -- fixture wrote nothing recoverable"
+    jpeg_present = jpeg_bytes in raw
+    docx_present = docx_bytes in raw
+    _log(f"\nraw VHD byte scan ({len(raw)} bytes): full JPEG content present={jpeg_present}, full DOCX content present={docx_present}")
+    assert jpeg_present, "deleted JPEG's full content not found anywhere in the raw VHD file -- nothing for any engine to recover"
+    assert docx_present, "deleted DOCX's full content not found anywhere in the raw VHD file -- nothing for any engine to recover"
 
     return {
         "vhd_path": vhd_path,
@@ -273,6 +266,59 @@ def _build_ntfs_volume(tmp_path_factory) -> dict:
         "docx_bytes": docx_bytes,
         "pdf_bytes": pdf_bytes,
     }
+
+
+def _plant_and_delete_ntfs_files(mount: Path, letter: str) -> tuple[bytes, bytes, bytes]:
+    """Plants the three known files, confirms all three landed, deletes the jpeg and
+    docx (the pdf stays live), confirms exactly the pdf remains, and flushes the
+    volume's cached writes. Returns (jpeg_bytes, docx_bytes, pdf_bytes) as actually
+    written and read back -- not independently regenerated."""
+    jpeg_dir = mount.joinpath(*_JPEG_DIR_PARTS)
+    jpeg_dir.mkdir(parents=True, exist_ok=True)
+    jpeg_path = jpeg_dir / _JPEG_NAME
+    # Random pixel noise (not a flat colour) so JPEG's DCT can't compress it away
+    # to a resident-sized file; 600x450 lands comfortably in the hundreds-of-KB
+    # range regardless of quality settings.
+    Image.frombytes("RGB", (600, 450), os.urandom(600 * 450 * 3)).save(jpeg_path, "JPEG", quality=90)
+    jpeg_bytes = jpeg_path.read_bytes()
+    _log(f"\njpeg size: {len(jpeg_bytes)} bytes")
+
+    doc_dir = mount.joinpath(*_DOC_DIR_PARTS)
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    docx_path = doc_dir / _DOCX_NAME
+    docx_bytes = _make_minimal_docx()
+    docx_path.write_bytes(docx_bytes)
+    _log(f"docx size: {len(docx_bytes)} bytes")
+
+    pdf_path = doc_dir / _PDF_NAME
+    pdf_bytes = b"%PDF-1.4\n" + _PDF_MARKER + b"\n" + (b"%" + b"x" * 78 + b"\n") * (_PDF_PAD_SIZE // 80)
+    pdf_path.write_bytes(pdf_bytes)
+    _log(f"pdf size: {len(pdf_bytes)} bytes")
+
+    planted = sorted(str(p.relative_to(mount)) for p in mount.rglob("*") if p.is_file())
+    _log(f"\nplanted on {mount} before delete: {planted}")
+    assert len(planted) == 3, f"expected 3 planted files on {mount}, found {planted}"
+
+    # Delete two of the three; the pdf stays live, mirroring test_filesystem.py's
+    # "one never-deleted file must NOT show up in the default deleted-only scan"
+    # assertion.
+    jpeg_path.unlink()
+    docx_path.unlink()
+
+    remaining = sorted(str(p.relative_to(mount)) for p in mount.rglob("*") if p.is_file())
+    _log(f"remaining on {mount} after delete: {remaining}")
+    assert remaining == [str(Path(*_DOC_DIR_PARTS) / _PDF_NAME)]
+
+    # Explicitly flush the volume's cached writes before detaching -- diskpart's
+    # own "detach vdisk" is a controlled dismount and should already do this, but
+    # this makes it an explicit, checkable step rather than an assumption.
+    flush_proc = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", f"Write-VolumeCache -DriveLetter {letter}"],
+        capture_output=True, text=True, timeout=30,
+    )
+    _log(f"\nWrite-VolumeCache -DriveLetter {letter}: rc={flush_proc.returncode}\n{flush_proc.stdout}{flush_proc.stderr}")
+
+    return jpeg_bytes, docx_bytes, pdf_bytes
 
 
 def _find(files, name: str):
