@@ -19,6 +19,7 @@ not skip quietly.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import re
@@ -256,7 +257,11 @@ def _build_ntfs_volume(tmp_path_factory) -> dict:
     raw = vhd_path.read_bytes()
     jpeg_present = jpeg_bytes in raw
     docx_present = docx_bytes in raw
-    _log(f"\nraw VHD byte scan ({len(raw)} bytes): full JPEG content present={jpeg_present}, full DOCX content present={docx_present}")
+    _log(
+        f"\nraw VHD byte scan ({len(raw)} bytes): full JPEG content present={jpeg_present}, full DOCX content present={docx_present}\n"
+        f"jpeg sha256 at fixture-return time (same object returned to every test): {hashlib.sha256(jpeg_bytes).hexdigest()}\n"
+        f"docx sha256 at fixture-return time: {hashlib.sha256(docx_bytes).hexdigest()}"
+    )
     assert jpeg_present, "deleted JPEG's full content not found anywhere in the raw VHD file -- nothing for any engine to recover"
     assert docx_present, "deleted DOCX's full content not found anywhere in the raw VHD file -- nothing for any engine to recover"
 
@@ -281,14 +286,14 @@ def _plant_and_delete_ntfs_files(mount: Path, letter: str) -> tuple[bytes, bytes
     # range regardless of quality settings.
     Image.frombytes("RGB", (600, 450), os.urandom(600 * 450 * 3)).save(jpeg_path, "JPEG", quality=90)
     jpeg_bytes = jpeg_path.read_bytes()
-    _log(f"\njpeg size: {len(jpeg_bytes)} bytes")
+    _log(f"\njpeg size: {len(jpeg_bytes)} bytes, sha256 at plant time: {hashlib.sha256(jpeg_bytes).hexdigest()}")
 
     doc_dir = mount.joinpath(*_DOC_DIR_PARTS)
     doc_dir.mkdir(parents=True, exist_ok=True)
     docx_path = doc_dir / _DOCX_NAME
     docx_bytes = _make_minimal_docx()
     docx_path.write_bytes(docx_bytes)
-    _log(f"docx size: {len(docx_bytes)} bytes")
+    _log(f"docx size: {len(docx_bytes)} bytes, sha256 at plant time: {hashlib.sha256(docx_bytes).hexdigest()}")
 
     pdf_path = doc_dir / _PDF_NAME
     pdf_bytes = b"%PDF-1.4\n" + _PDF_MARKER + b"\n" + (b"%" + b"x" * 78 + b"\n") * (_PDF_PAD_SIZE // 80)
@@ -360,8 +365,17 @@ def _diagnose_byte_mismatch(recovered_file, recovered: bytes, ntfs_volume: dict,
 
     parts = [
         f"=== byte mismatch diagnostic for {label} ===",
-        f"recovered: {len(recovered)} bytes\n{_hex_head_tail(recovered)}",
-        f"original: {len(original)} bytes\n{_hex_head_tail(original)}",
+        # If the fixture were generating "original" separately from what it actually
+        # wrote (e.g. re-deriving it instead of reusing the exact object read back at
+        # plant time), the sha256 recorded when the file was planted (see
+        # _plant_and_delete_ntfs_files's own log line) would differ from this one --
+        # both computed from the identical ntfs_volume["<label>_bytes"] object, so a
+        # mismatch here would mean the object itself was mutated or replaced somewhere
+        # between plant and this comparison, not just an engine/VHD problem.
+        f"recovered: {len(recovered)} bytes, sha256={hashlib.sha256(recovered).hexdigest()}\n{_hex_head_tail(recovered)}",
+        f"original: {len(original)} bytes, sha256={hashlib.sha256(original).hexdigest()} "
+        "(compare against this file's 'sha256 at plant time' log line above)\n"
+        f"{_hex_head_tail(original)}",
     ]
 
     # 1) Is the recovered content actually a DIFFERENT one of our own planted files?
