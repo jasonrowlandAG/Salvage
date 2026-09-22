@@ -85,7 +85,9 @@ def test_most_pages_reach_900x600():
             if name in _ALLOWED_ABOVE_STRETCH:
                 # Still must be well under the old ~1200-1360px floor, and under the
                 # 1000x640 primary target checked above - just not necessarily 900.
-                assert hint.width() < 1000, f"{name}: stack minimum width {hint.width()} regressed toward the old floor"
+                assert hint.width() <= _TARGET[0], (
+                    f"{name}: stack minimum width {hint.width()} regressed toward the old floor"
+                )
                 continue
             assert hint.width() <= _STRETCH[0] + _STRETCH_TOLERANCE, (
                 f"{name}: stack minimum width {hint.width()} > {_STRETCH[0]}"

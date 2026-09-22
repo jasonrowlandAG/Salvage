@@ -61,16 +61,16 @@ class OptionsPage(QWidget):
         mode_title.setStyleSheet("font-weight: 600;")
         mode_layout.addWidget(mode_title)
         self.quick_radio = QRadioButton(
-            "Quick — finds deleted files with their original names and folders\n"
-            "Needs an intact filesystem"
+            "Quick — deleted files with original names and folders.\n"
+            "Needs an intact filesystem."
         )
         self.deep_radio = QRadioButton(
-            "Deep — scans every sector for file signatures\n"
-            "Finds more after a format, but names are lost"
+            "Deep — scans every sector for file signatures.\n"
+            "Finds more after a format, but names are lost."
         )
         self.thorough_radio = QRadioButton(
-            "Thorough — filesystem records first, then every sector\n"
-            "Best results, slowest"
+            "Thorough — filesystem records first, then every sector.\n"
+            "Best results, slowest."
         )
         self.thorough_radio.setChecked(True)
         mode_layout.addWidget(self.quick_radio)
@@ -103,14 +103,17 @@ class OptionsPage(QWidget):
         self.everything_check.stateChanged.connect(self._on_everything_toggled)
         types_layout.addWidget(self.everything_check)
 
-        grid = QHBoxLayout()
         self.category_checks: dict[str, QCheckBox] = {}
-        for cat, label in CATEGORY_LABELS:
-            cb = QCheckBox(label)
-            cb.stateChanged.connect(self._on_category_toggled)
-            self.category_checks[cat] = cb
-            grid.addWidget(cb)
-        types_layout.addLayout(grid)
+        for row_index, row_labels in enumerate((CATEGORY_LABELS[:3], CATEGORY_LABELS[3:])):
+            row = QHBoxLayout()
+            for cat, label in row_labels:
+                cb = QCheckBox(label)
+                cb.stateChanged.connect(self._on_category_toggled)
+                self.category_checks[cat] = cb
+                row.addWidget(cb)
+            if row_index == 0:
+                row.addStretch()
+            types_layout.addLayout(row)
         outer.addWidget(types_panel)
 
         dest_panel = QFrame()
