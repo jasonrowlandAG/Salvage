@@ -15,6 +15,12 @@ macOS (see `docs/release-checklist.md`).
 
 ## [Unreleased]
 
+### Changed — distribution (2026-09-22)
+- Chose the **no-fee / source-first** public path: install via Homebrew tools
+  + `python -m salvage`; no Apple Developer Program / notarized DMG for v0.1.
+- Documented privacy stance (no telemetry, no crash reporting, manual updates)
+  in `docs/privacy.md` and the README; support contact `jay@assemblygrowth.com`.
+
 ### Added — packaging, licensing and release infrastructure (2026-09-18)
 - `packaging/make_dmg.sh`: builds a compressed, signed, read-only
   `Salvage-<version>.dmg` with an `/Applications` shortcut and a generated

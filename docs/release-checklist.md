@@ -7,7 +7,28 @@ completed, not when they're merely understood.
 
 Related docs: `docs/legal-compliance.md` (licensing analysis),
 `packaging/THIRD_PARTY.md` (notices + written source offer shipped in the
-app), `CHANGELOG.md`.
+app), `docs/privacy.md`, `CHANGELOG.md`.
+
+---
+
+## 0. Distribution mode (chosen 2026-09-22)
+
+**Active mode: no-fee / source-first.** We are **not** joining the Apple
+Developer Program for v0.1. Public install is clone + Homebrew tools +
+`python -m salvage` (see README). Optional self-built `.app` is documented
+as Gatekeeper-rejected without right-click → Open. Notarization (§4) and a
+Windows installer (§5) remain optional later work, not launch blockers.
+
+### No-fee launch checklist
+
+- [ ] README install path works on a clean Mac (Homebrew + uv + clone).
+- [ ] `docs/privacy.md` published; crash reporting = **none**; updates = **manual git pull**.
+- [ ] Support contact published (`jay@assemblygrowth.com`).
+- [ ] GitHub repo set to **public**.
+- [ ] Tag `v0.1.0`, GitHub Release with release notes (source tag; no notarized DMG asset required).
+- [ ] CI green on `main` (macOS + Ubuntu + Windows tests).
+- [ ] `SALVAGE_FAKE=1 .venv/bin/python -m salvage` smoke pass.
+- [ ] About / Licences screens work when run from source.
 
 ---
 
@@ -258,78 +279,40 @@ assuming it's a UI bug.
 
 ## 8. Crash / error reporting policy
 
-No crash or error reporting exists today — nothing in the dependency list
-(`pip list`) includes a crash-reporting SDK (no Sentry, no Crashlytics
-equivalent, nothing). Given the privacy stance below, that's arguably
-correct as a default, but it should be a decision, not an oversight.
+**Decided 2026-09-22 (no-fee path):** ship with **no** automated crash
+reporting. Users report bugs manually. How to find crash logs is documented
+in `docs/privacy.md` (macOS: Console.app / DiagnosticReports).
 
-- [ ] Decide, explicitly: ship with no automated crash reporting (keeps
-      the "no network calls" claim in §9 literally true, strongest
-      privacy story, but means you rely entirely on user-reported bugs),
-      or add strictly opt-in reporting (never on by default, given this
-      app reads recovered personal photos/messages/files — an opt-out or
-      silent crash reporter would be a serious privacy regression for a
-      *recovery* tool specifically, which by definition handles sensitive
-      recovered data).
+- [x] Decision recorded: no crash SDK.
+- [x] Manual crash-log instructions in `docs/privacy.md`.
 - [ ] If adding opt-in reporting later, it must not send recovered file
       contents, paths that reveal personal information, or device
-      identifiers beyond what's needed to reproduce a crash — write that
-      constraint down before choosing a vendor, not after integrating one.
-- [ ] Until then: document for users how to find and send you a crash log
-      manually (macOS: Console.app / `~/Library/Logs/DiagnosticReports`;
-      Windows: Event Viewer → Windows Logs → Application).
+      identifiers beyond what's needed to reproduce a crash — and
+      `docs/privacy.md` must update in the same release.
 
 ## 9. Privacy statement
 
-**Verified this pass: Salvage makes no network calls.** Checked by:
-- `pip list` inside `.venv` — no `requests`, `urllib3`, `httpx`, `aiohttp`,
-  or any HTTP/analytics/telemetry package installed at all.
-- `grep -rniE` across `salvage/` for `socket`, `QtNetwork`,
-  `QNetworkAccessManager`, `urllib`, `http.client`, and similar — zero
-  matches in actual code. The only `http(s)://` strings anywhere in
-  `salvage/` are (a) a help-dialog message pointing a user to *manually*
-  download TestDisk if it's missing, and (b) hardcoded URL strings inside
-  test fixture data for a Safari-history *parsing* test — neither is a
-  live network call.
-- `QtNetwork.framework` is present in the bundle (PyInstaller's standard
-  PySide6/Qt dependency set includes it whether or not it's used), but
-  nothing in `salvage/` imports or calls into it.
+**Verified: Salvage makes no network calls** (no HTTP client deps in
+`salvage/`; see earlier grep pass). Public statement lives in the README
+and `docs/privacy.md`.
 
-This is a genuine, verifiable selling point for a file-recovery tool
-specifically — users trust it with recovered personal photos, messages,
-and documents, and "your recovered files never leave this Mac" is both true
-today and easy to keep true.
-
-- [ ] Write a short, public-facing privacy statement using the verification
-      above, e.g.: *"Salvage never sends anything over the network. All
-      scanning, recovery, and preview happens entirely on your device.
-      There is no telemetry, no analytics, no account, and no cloud
-      component — verify it yourself: the source is on GitHub."*
-- [ ] Re-run the same grep check as part of the pre-release smoke test
-      (§11) for every future release — this claim needs to stay true, not
-      just be true once.
-- [ ] If crash reporting (§8) is ever added, the privacy statement must be
-      updated in the same release, not after.
+- [x] Public-facing privacy statement written.
+- [ ] Re-run the privacy grep as part of every tagged release smoke test.
+- [ ] If crash reporting (§8) is ever added, update the privacy docs in
+      the same release.
 
 ## 10. Support and update channels
 
-No infrastructure exists for either yet.
+**Decided 2026-09-22:**
 
-- [ ] Decide and publish a support contact — `packaging/THIRD_PARTY.md`'s
-      written source offer currently points to `jay@assemblygrowth.com`;
-      confirm that's the intended long-term address or set up a dedicated
-      one (e.g. `support@` or `salvage@` at whatever domain Salvage ships
-      under) before launch, since GPL source requests will go there too.
-- [ ] Decide an update mechanism: manual re-download (simplest, matches
-      "no network calls" exactly, but means users must notice a new
-      version themselves), versus an in-app update check (any check-in
-      call, even a passive one, contradicts the "no network calls" privacy
-      claim above unless it's explicitly opt-in and disclosed — decide
-      deliberately, don't add one silently later).
-- [ ] Pick where releases live (GitHub Releases is the obvious default
-      given `packaging/THIRD_PARTY.md`'s source links already point to
-      GitHub for the bundled components) and document it somewhere a user
-      would actually find it (README, and/or the About panel from §3).
+- Support / GPL source offer: **jay@assemblygrowth.com** (same as
+  `packaging/THIRD_PARTY.md`).
+- Updates: **manual** (`git pull` / new GitHub tag) — no in-app update check.
+- Releases: **GitHub Releases** on `jasonrowlandAG/Salvage`.
+
+- [x] Support contact published in README.
+- [x] Update mechanism decided (manual).
+- [x] Release host decided (GitHub Releases).
 
 ## 11. Pre-release smoke test (all platforms)
 
@@ -367,50 +350,14 @@ No infrastructure exists for either yet.
 
 ---
 
-## Outstanding launch blockers (as of this pass)
+## Outstanding items (no-fee path, as of 2026-09-22)
 
-Ranked by severity, not by section order above:
+Launch blockers for source-first v0.1:
 
-1. **The Sleuth Kit tools (`fls`/`icat`/`fsstat`/`mmls`) aren't in the
-   installer**, despite `salvage/engine/filesystem.py` requiring them for
-   Quick scan and for the *default* Thorough mode. `packaging/build_mac.sh`'s
-   `TOOLS` array only copies `photorec` and the four libimobiledevice
-   tools. On this dev machine it's masked because
-   `FilesystemEngine.locate_binaries()` falls back to Homebrew's
-   `/opt/homebrew/bin/*` — on any other Mac, Quick/Thorough scan will raise
-   `FileNotFoundError` immediately. Not fixed in this pass: closing it
-   properly also pulls in `libewf` and `afflib` (licences now vetted in
-   `packaging/THIRD_PARTY.md`, but afflib's non-standard advertising clause
-   needs a decision) and is a product call, not a docs/installer change.
-   See `docs/legal-compliance.md`'s "practical, lowest-friction path"
-   section for both options.
-2. **x265, bundled inside the pillow-heif wheel, is GPL-2.0** and — because
-   it's dynamically loaded *into the same process* as Salvage's own code
-   (unlike PhotoRec, which is a clean subprocess) — creates a genuinely
-   contested "does this make the combined work GPL" question. Recommended
-   fix: stop shipping x265 (Salvage only decodes HEIC for preview; a
-   decode-only libheif build removes the whole question). Not fixed in
-   this pass — it's an engineering task (rebuild/re-vendor libheif), not a
-   doc change. See `docs/legal-compliance.md` for the full analysis; get a
-   real lawyer's opinion before a *paid* launch if x265 is still bundled.
-3. **Not notarized.** `packaging/notarize.sh` is written but has never
-   run — needs a paid Apple Developer account, a Developer ID certificate,
-   and stored notarytool credentials, none of which exist on this machine
-   today. Until it runs, every downloader sees Gatekeeper's rejection
-   (confirmed message captured in §4) and needs right-click → Open.
-4. **Windows installer untested.** The PyInstaller build itself
-   (`packaging/salvage_windows.spec` / `packaging/build_windows.ps1`) is
-   now built and exercised on every push via `.github/workflows/ci.yml`,
-   including a real NTFS recovery pass (§6) — but the NSIS installer
-   (`packaging/windows/installer.nsi`) is still never built or run, because
-   nothing in CI drives `makensis` yet and there's no interactive Windows
-   machine outside CI to click through install/uninstall. Needs a real
-   pass per §5 before it ships, plus a code-signing certificate
-   (SmartScreen will otherwise warn on every first run).
-5. **No Licences/About UI yet** — §3 specifies exactly what's needed and
-   the data files are already bundled and ready to read; the screen itself
-   hasn't been built (owned by UI work, not this pass).
-6. **No support/update channel decided** — §10. Low effort, not yet done.
-7. **No crash-reporting decision recorded** — §8. Defaulting to "none" is
-   defensible and keeps the privacy story simple, but write that decision
-   down rather than leaving it implicit.
+1. **Make the GitHub repo public** and tag `v0.1.0` (operational; see §0).
+2. **Optional later — not required for no-fee launch:**
+   - Apple Developer Program + notarized DMG (§4).
+   - Windows NSIS installer signed and tested (§5).
+   - Bundling Sleuth Kit inside a `.app` (source path uses `brew install sleuthkit`).
+   - Removing x265 from pillow-heif before a *paid* / notarized binary launch
+     (`docs/legal-compliance.md`).
