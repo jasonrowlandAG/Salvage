@@ -61,13 +61,16 @@ class OptionsPage(QWidget):
         mode_title.setStyleSheet("font-weight: 600;")
         mode_layout.addWidget(mode_title)
         self.quick_radio = QRadioButton(
-            "Quick — finds deleted files with their original names and folders; needs an intact filesystem"
+            "Quick — finds deleted files with their original names and folders\n"
+            "Needs an intact filesystem"
         )
         self.deep_radio = QRadioButton(
-            "Deep — scans every sector for file signatures; finds more after a format, but names are lost"
+            "Deep — scans every sector for file signatures\n"
+            "Finds more after a format, but names are lost"
         )
         self.thorough_radio = QRadioButton(
-            "Thorough — filesystem records first, then every sector (best results, slowest)"
+            "Thorough — filesystem records first, then every sector\n"
+            "Best results, slowest"
         )
         self.thorough_radio.setChecked(True)
         mode_layout.addWidget(self.quick_radio)

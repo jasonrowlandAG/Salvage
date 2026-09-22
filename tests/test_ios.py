@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import plistlib
 import sqlite3
 import stat
@@ -367,8 +368,12 @@ def test_backup_reader_decrypted_manifest_cache_is_private_and_not_beside_backup
         assert backup_dir.parent not in cache_dir.parents
         assert cache_dir != backup_dir.parent / "salvage_cache" / backup_dir.name
 
-        assert stat.S_IMODE(cache_dir.stat().st_mode) == 0o700
-        assert stat.S_IMODE(cache_path.stat().st_mode) == 0o600
+        # POSIX mode bits do not represent Windows ACLs. On Windows these
+        # temporary files inherit the current user's protected temp-directory
+        # ACL, while macOS/Linux enforce the explicit 0700/0600 modes.
+        if os.name != "nt":
+            assert stat.S_IMODE(cache_dir.stat().st_mode) == 0o700
+            assert stat.S_IMODE(cache_path.stat().st_mode) == 0o600
 
         # Still fully usable while open.
         assert reader.find(domain="HomeDomain", relative_path_like="Library/SMS/sms.db")

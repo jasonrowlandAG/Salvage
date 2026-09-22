@@ -605,9 +605,12 @@ class BackupReader:
         dest = cache_dir / "Manifest.decrypted.db"
         fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
-            os.write(fd, plaintext)
-        finally:
+            output = os.fdopen(fd, "wb")
+        except Exception:
             os.close(fd)
+            raise
+        with output:
+            output.write(plaintext)
         return dest
 
     def close(self) -> None:

@@ -164,7 +164,7 @@ def test_recover_records_finds_deleted_message_reclaimed_into_gap(tmp_path):
     assert len(recovered) >= 1
 
 
-def test_recover_records_bounds_hostile_page_count_in_sparse_file(tmp_path):
+def test_recover_records_bounds_hostile_page_count_in_sparse_file(tmp_path, monkeypatch):
     # A hostile/corrupt SQLite header can declare a page_count far beyond
     # what real data the file holds. Before the fix, recover_records() would
     # iterate `range(1, page_count + 1)` unconditionally - a sparse file made
@@ -179,7 +179,13 @@ def test_recover_records_bounds_hostile_page_count_in_sparse_file(tmp_path):
     conn.commit()
     conn.close()
 
-    hostile_page_count = 12_000_000  # ~46 GB logical size if trusted outright
+    # Exercise the hard cap with a small temporary budget. Windows does not
+    # automatically make seek-extended files sparse, so a 46 GB logical fixture
+    # can consume the runner's disk instead of a single block.
+    from salvage.engine import sqlite_recover
+
+    monkeypatch.setattr(sqlite_recover, "_MAX_PAGE_SCAN_BUDGET", 8)
+    hostile_page_count = 32
 
     with open(db, "r+b") as f:
         header = bytearray(f.read(100))
@@ -189,8 +195,8 @@ def test_recover_records_bounds_hostile_page_count_in_sparse_file(tmp_path):
         header[28:32] = struct.pack(">I", hostile_page_count)
         f.seek(0)
         f.write(header)
-        # Sparse-extend so the file's *apparent* size matches the hostile
-        # claim (this writes ~1 byte to disk, not tens of GB).
+        # Make the file's apparent size match the hostile claim. This remains
+        # small on filesystems that do not support sparse seek extension.
         f.seek(page_size * hostile_page_count - 1)
         f.write(b"\x00")
 

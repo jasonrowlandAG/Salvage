@@ -92,9 +92,15 @@ def require_safe_for_elevation(path: Path, from_path: bool) -> None:
     if not from_path:
         return
     if os.name == "nt":
-        # No POSIX ownership/mode bits to check, and run_privileged() here is
-        # POSIX-only (macOS osascript / Linux pkexec) - nothing to enforce yet.
-        return
+        # Windows has no POSIX owner/mode bits we can validate here. Refuse a
+        # PATH-only match instead of elevating an executable from a potentially
+        # user-writable directory. Release bundles and fixed install locations
+        # resolve with from_path=False, so normal packaged scans are unaffected.
+        raise PermissionError(
+            f"Refusing to run '{path}' with administrator privileges: it was found on PATH "
+            "rather than in the Salvage bundle or a trusted install location. "
+            "Reinstall Salvage or install the recovery tools in their standard location."
+        )
     try:
         st = path.stat()
     except OSError as exc:

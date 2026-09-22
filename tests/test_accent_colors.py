@@ -84,9 +84,16 @@ def test_lineedit_selection_background_is_brand_blue(app):
     le.show()
     app.processEvents()
     pix = le.grab()
-    # Sample a pixel under the selected text, away from the border.
-    color = QColor(pix.toImage().pixel(15, 12))
-    assert _is_close(color, _BRAND_BLUE), f"expected brand blue near {color.name()}"
+    # Glyph placement differs across platform fonts, so a fixed coordinate can
+    # land on white selected text instead of its blue background. Inspect the
+    # interior selection region (excluding the blue focus border) instead.
+    image = pix.toImage()
+    blue_pixels = sum(
+        _is_close(QColor(image.pixel(x, y)), _BRAND_BLUE)
+        for x in range(4, min(45, pix.width() - 4))
+        for y in range(4, pix.height() - 4)
+    )
+    assert blue_pixels >= 10, f"expected brand-blue selection fill, found {blue_pixels} pixels"
     le.hide()
 
 

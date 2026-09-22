@@ -332,7 +332,9 @@ class ResultsPage(QWidget):
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 20, 24, 20)
+        # Keep the dense three-pane results view usable at 1000px across Qt's
+        # platform-specific font metrics (Linux otherwise exceeded it by 12px).
+        outer.setContentsMargins(18, 20, 18, 20)
         outer.setSpacing(12)
 
         heading = QLabel("Recovered files")
