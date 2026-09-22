@@ -68,15 +68,6 @@ _CATEGORY_ICON_PIXMAP = {
 }
 
 
-def _protect_button_width(button: QPushButton) -> None:
-    """Stops a footer button's own label from being compressed below its sizeHint
-    when a sibling widget (e.g. a long status label) is starved for space — see the
-    footer_row construction below."""
-    policy = button.sizePolicy()
-    policy.setHorizontalPolicy(QSizePolicy.Policy.Minimum)
-    button.setSizePolicy(policy)
-
-
 class FileListModel(QAbstractListModel):
     def __init__(self, files: list[RecoveredFile], parent=None) -> None:
         super().__init__(parent)
@@ -361,12 +352,14 @@ class ResultsPage(QWidget):
         self.hide_corrupt_check = QCheckBox("Hide corrupt")
         self.hide_corrupt_check.stateChanged.connect(self._apply_filter)
         sidebar.addWidget(self.hide_corrupt_check)
-        self.hide_on_disk_check = QCheckBox("Hide files already on disk")
+        self.hide_on_disk_check = QCheckBox("Hide on disk")
+        self.hide_on_disk_check.setToolTip("Hide files that are already present on the source volume")
         self.hide_on_disk_check.stateChanged.connect(self._apply_filter)
         sidebar.addWidget(self.hide_on_disk_check)
 
         sidebar_widget = QWidget()
         sidebar_widget.setLayout(sidebar)
+        sidebar_widget.setMaximumWidth(200)
         body.addWidget(sidebar_widget)
 
         center = QVBoxLayout()
@@ -407,20 +400,18 @@ class ResultsPage(QWidget):
 
         actions_row = QHBoxLayout()
         actions_row.addStretch()
-        select_all_btn = QPushButton("Select all (filtered)")
+        select_all_btn = QPushButton("Select all")
         select_all_btn.setToolTip("Select every file that matches the current filters")
         select_all_btn.clicked.connect(self._select_all_filtered)
-        _protect_button_width(select_all_btn)
         actions_row.addWidget(select_all_btn)
         select_none_btn = QPushButton("Select none")
         select_none_btn.clicked.connect(self._select_none)
-        _protect_button_width(select_none_btn)
         actions_row.addWidget(select_none_btn)
-        self.recover_btn = QPushButton("Recover selected")
+        self.recover_btn = QPushButton("Recover")
+        self.recover_btn.setToolTip("Recover the selected files to your destination folder")
         self.recover_btn.setProperty("role", "primary")
         self.recover_btn.setEnabled(False)
         self.recover_btn.clicked.connect(self._recover_clicked)
-        _protect_button_width(self.recover_btn)
         actions_row.addWidget(self.recover_btn)
         footer.addLayout(actions_row)
         center.addLayout(footer)
