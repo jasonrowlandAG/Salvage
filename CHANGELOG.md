@@ -1,12 +1,7 @@
 # Changelog
 
 All notable changes to Salvage are documented here. Format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
-hasn't cut a tagged release yet, so everything to date is under
-"Unreleased." When a version is actually tagged and shipped, rename its
-section to `## [x.y.z] - YYYY-MM-DD` (DD/MM/YYYY in any user-facing text,
-per Assembly Growth convention; ISO 8601 here to match the Changelog spec)
-and start a fresh "Unreleased" section above it.
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 The single source of truth for the current version is `pyproject.toml`'s
 `[project].version` — `packaging/salvage.spec` reads it directly at build
@@ -15,7 +10,12 @@ macOS (see `docs/release-checklist.md`).
 
 ## [Unreleased]
 
-### Changed — distribution (2026-09-22)
+## [0.1.0] - 2026-09-22
+
+First public source-first release. Install with Homebrew recovery tools and
+`python -m salvage` (see README). No Apple-notarized DMG.
+
+### Changed — distribution
 - Chose the **no-fee / source-first** public path: install via Homebrew tools
   + `python -m salvage`; no Apple Developer Program / notarized DMG for v0.1.
 - Documented privacy stance (no telemetry, no crash reporting, manual updates)
@@ -84,18 +84,8 @@ macOS (see `docs/release-checklist.md`).
 - End-to-end UI test driving the real Qt wizard offscreen over a synthetic
   home directory covering every media source kind.
 
-### Changed — product features
-- Drive list hides EFI/recovery/system-plumbing volumes and labels APFS
-  containers; on-demand cloud mounts are left unticked by default in the
-  media finder, and encrypted backups are skipped there (handled instead
-  by the dedicated iOS backup flow, which supports them).
-
-### Fixed — product features
-- Drive rows not responding to clicks on the source page.
-- iCloud placeholder files being read (and thus materialized) during media
-  scans.
-- PhotoRec file-type filter toggles returning no results.
-- Duplicate results and non-UTC timestamps in Thorough mode.
-- Icon path in the PyInstaller spec.
-- Several end-to-end UI seams: missing-binary dialog, cancel state, and
-  closing the app mid-scan.
+### Fixed
+- Cross-platform CI failures on Windows and Ubuntu (encrypted Manifest.db
+  writes, PATH elevation checks, layout min-width, platform-safe tests).
+- Security review findings closed before public release (see
+  `docs/security-review.md`).
