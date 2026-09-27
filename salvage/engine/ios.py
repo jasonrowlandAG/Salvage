@@ -148,6 +148,12 @@ _REFUSED = "device refused to start the backup process"
 _VERSION_MISMATCH = "backup protocol version mismatch"
 _NEEDS_PASSWORD = "Can't get password input in non-interactive mode"
 _ENCRYPTED_BACKUP = "This is an encrypted backup"
+_NO_SPACE = "No space left on device"
+# The device's own failure reason, e.g.
+#   ErrorCode 102: Output stream write error: ... (MBErrorDomain/102)
+# A mid-backup abort is followed by a cleanup failure (ErrorCode 104, "Error removing
+# snapshot directory"), so the first ErrorCode line is the real cause.
+_DEVICE_ERROR_RE = re.compile(r"ErrorCode (\d+): (.+?)(?: \(MBErrorDomain/\d+\))?\.?\s*$", re.M)
 
 
 def _parse_size(text: str) -> int | None:
@@ -261,6 +267,18 @@ def create_backup(
         raise IOSBackupError("Backup cancelled.")
 
     if proc.returncode != 0:
+        log_path = backup_root / "idevicebackup2.log"
+        try:
+            log_path.write_text(buf, encoding="utf-8")
+        except OSError:
+            pass
+        if _NO_SPACE in buf:
+            raise IOSBackupError(
+                "The iPhone ran out of free storage while preparing the backup. Free up a "
+                "few GB on the iPhone (Settings > General > iPhone Storage; offloading apps "
+                "keeps their data), then try again. If the iPhone has plenty of space, check "
+                "the destination drive has room too."
+            )
         if _NEEDS_PASSWORD in buf or _ENCRYPTED_BACKUP in buf:
             raise IOSBackupError(
                 "This backup is password-protected. Salvage cannot read encrypted iPhone "
@@ -277,7 +295,16 @@ def create_backup(
                 "The iPhone refused the backup request. Unlock the device, tap Trust if "
                 "prompted, then try again."
             )
-        raise IOSBackupError(f"idevicebackup2 exited with an error (code {proc.returncode}).")
+        device_error = _DEVICE_ERROR_RE.search(buf)
+        if device_error is not None:
+            raise IOSBackupError(
+                f"The iPhone stopped the backup: {device_error.group(2)} "
+                f"(error {device_error.group(1)}). Full output saved to {log_path}."
+            )
+        raise IOSBackupError(
+            f"idevicebackup2 exited with an error (code {proc.returncode}). "
+            f"Full output saved to {log_path}."
+        )
 
     if saw_passcode_wait and "Backup Failed" in buf:
         raise IOSBackupError(

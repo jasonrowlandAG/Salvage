@@ -10,6 +10,13 @@ macOS (see `docs/release-checklist.md`).
 
 ## [Unreleased]
 
+### Fixed
+
+- iPhone backup failures now show the device's own reason instead of a bare
+  exit code (for example "code 152"), with a specific message when the iPhone
+  runs out of free storage. The full `idevicebackup2` output is saved as
+  `idevicebackup2.log` in the session's `_ios_backup` folder.
+
 ## [0.1.0] - 2026-09-22
 
 First public source-first release. Install with Homebrew recovery tools and

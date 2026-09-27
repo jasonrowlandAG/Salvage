@@ -61,6 +61,60 @@ def test_parse_size_converts_units_to_bytes():
 
 
 # ---------------------------------------------------------------------------
+# create_backup failure reporting (stub idevicebackup2 replaying real output)
+# ---------------------------------------------------------------------------
+
+_NO_SPACE_OUTPUT = (
+    "Starting backup...\n"
+    "Backup will be encrypted.\n"
+    "ErrorCode 102: Output stream write error: Error Domain=NSPOSIXErrorDomain Code=28 "
+    '"No space left on device" UserInfo={_kCFStreamErrorCodeKey=28} (MBErrorDomain/102)\n'
+    "Received 0 files from device.\n"
+    "Backup Failed (Error Code 102).\n"
+)
+
+_MIDWAY_ABORT_OUTPUT = (
+    "Starting backup...\n"
+    "ErrorCode 105: Insufficient free disk space on drive to upload files (MBErrorDomain/105)\n"
+    "Could not remove '/x/Snapshot': Directory not empty (66)\n"
+    "ErrorCode 104: Error removing snapshot directory (MBErrorDomain/104). "
+    "Underlying error: Directory not empty (MBErrorDomain/100).\n"
+    "Backup Failed (Error Code 104).\n"
+)
+
+
+def _stub_backup_tool(tmp_path: Path, monkeypatch, output: str, exit_code: int) -> None:
+    (tmp_path / "out.txt").write_text(output)
+    script = tmp_path / "idevicebackup2"
+    script.write_text(f'#!/bin/sh\ncat "{tmp_path / "out.txt"}"\nexit {exit_code}\n')
+    script.chmod(0o755)
+    monkeypatch.setattr(ios, "_tool", lambda name: str(script))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stub tool is a POSIX shell script")
+def test_create_backup_reports_iphone_out_of_space_and_saves_log(tmp_path, monkeypatch):
+    _stub_backup_tool(tmp_path, monkeypatch, _NO_SPACE_OUTPUT, 154)
+    root = tmp_path / "backup"
+
+    with pytest.raises(ios.IOSBackupError, match="iPhone ran out of free storage"):
+        ios.create_backup("UDID", root)
+
+    assert "No space left on device" in (root / "idevicebackup2.log").read_text()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="stub tool is a POSIX shell script")
+def test_create_backup_surfaces_first_device_error_not_snapshot_cleanup(tmp_path, monkeypatch):
+    _stub_backup_tool(tmp_path, monkeypatch, _MIDWAY_ABORT_OUTPUT, 152)
+
+    with pytest.raises(ios.IOSBackupError) as excinfo:
+        ios.create_backup("UDID", tmp_path / "backup")
+
+    message = str(excinfo.value)
+    assert "Insufficient free disk space on drive to upload files (error 105)" in message
+    assert "snapshot" not in message.lower()
+
+
+# ---------------------------------------------------------------------------
 # Manifest.db parsing (synthetic fixture, no real device needed)
 # ---------------------------------------------------------------------------
 
