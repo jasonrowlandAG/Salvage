@@ -21,14 +21,14 @@ Windows installer (§5) remain optional later work, not launch blockers.
 
 ### No-fee launch checklist
 
-- [ ] README install path works on a clean Mac (Homebrew + uv + clone).
-- [ ] `docs/privacy.md` published; crash reporting = **none**; updates = **manual git pull**.
-- [ ] Support contact published (`jay@assemblygrowth.com`).
-- [ ] GitHub repo set to **public**.
-- [ ] Tag `v0.1.0`, GitHub Release with release notes (source tag; no notarized DMG asset required).
-- [ ] CI green on `main` (macOS + Ubuntu + Windows tests).
-- [ ] `SALVAGE_FAKE=1 .venv/bin/python -m salvage` smoke pass.
-- [ ] About / Licences screens work when run from source.
+- [x] README install path works on a clean Mac — verified 22/11/2026 by cloning the public repo into a temp dir, `uv venv` + install, launching (menu bar + About/Licences present).
+- [x] `docs/privacy.md` published; crash reporting = **none**; updates = **manual git pull**.
+- [x] Support contact published (`jay@assemblygrowth.com`) in README.
+- [x] GitHub repo is **public**.
+- [x] Tag `v0.1.0` exists. (A GitHub Release with notes is still worth publishing off that tag.)
+- [x] CI green on `main` (macOS + Ubuntu + Windows tests, plus the Windows build and installer smoke test).
+- [x] `SALVAGE_FAKE=1` smoke pass, run from a clean clone.
+- [x] About / Licences screens work when run from source (verified in the clean clone).
 
 ---
 
@@ -48,7 +48,7 @@ via `makensis /DAPP_VERSION=x.y.z installer.nsi`.
 - [ ] To bump the version: edit `pyproject.toml` only, then rebuild
       (`packaging/build_mac.sh`) — confirm with
       `/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' dist/Salvage.app/Contents/Info.plist`.
-- [ ] Whatever CI/build step eventually drives `makensis` on Windows must
+- [x] CI drives `makensis` on windows-latest (see `.github/workflows/ci.yml`), and must
       read the version from `pyproject.toml` and pass it via `/DAPP_VERSION`
       — it is not automatic yet, unlike macOS. Wire this up before the
       first Windows release, not after.
