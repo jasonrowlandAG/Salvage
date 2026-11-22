@@ -150,6 +150,9 @@ _VERSION_MISMATCH = "backup protocol version mismatch"
 _NEEDS_PASSWORD = "Can't get password input in non-interactive mode"
 _ENCRYPTED_BACKUP = "This is an encrypted backup"
 _NO_SPACE = "No space left on device"
+# What the device itself reports when the Mac cannot hold the backup, e.g.
+# "ErrorCode 105: Insufficient free disk space on drive to back up (MBErrorDomain/105)".
+_INSUFFICIENT_SPACE = ("Insufficient free disk space", "MBErrorDomain/105")
 # The device's own failure reason, e.g.
 #   ErrorCode 102: Output stream write error: ... (MBErrorDomain/102)
 # A mid-backup abort is followed by a cleanup failure (ErrorCode 104, "Error removing
@@ -169,6 +172,49 @@ def _parse_size(text: str) -> int | None:
 # handshake has stalled, which is what happens on an iOS release newer than the bundled
 # libimobiledevice understands. Fail with a clear message instead of hanging forever.
 _STALL_TIMEOUT_S = 120.0
+
+
+def _fmt_gb(num_bytes: float) -> str:
+    return f"{num_bytes / 1e9:.1f} GB"
+
+
+def _no_space_message(udid: str, backup_root: Path, device_reason: str | None = None) -> str:
+    """Say which side is short. The device reports "insufficient free disk space" when the
+    Mac's drive cannot hold the backup, but a nearly full iPhone fails the same way, so
+    quote both numbers instead of guessing and sending the user after the wrong one."""
+    try:
+        dest_free = shutil.disk_usage(backup_root).free
+    except OSError:
+        dest_free = None
+    def _int(key: str) -> int | None:
+        try:
+            return int(_ideviceinfo_value(udid, key, domain="com.apple.disk_usage") or "")
+        except (ValueError, OSError):
+            return None  # unknown must stay unknown: 0 would read as "phone is full"
+
+    capacity, phone_free = _int("TotalDataCapacity"), _int("AmountDataAvailable")
+    used = capacity - phone_free if capacity and phone_free is not None else None
+
+    parts = ["There isn't enough free space to back up this iPhone."]
+    if dest_free is not None and used:
+        parts.append(
+            f"The backup folder's drive has {_fmt_gb(dest_free)} free and the iPhone holds roughly "
+            f"{_fmt_gb(used)} of data."
+        )
+    elif dest_free is not None:
+        parts.append(f"The backup folder's drive has only {_fmt_gb(dest_free)} free.")
+    if dest_free is not None and used and dest_free < used:
+        parts.append("Choose a destination folder on a drive with more room (an external drive works well).")
+    elif phone_free is not None and phone_free < 2e9:
+        parts.append(
+            "The iPhone itself is nearly full - free up a few GB (Settings > General > iPhone "
+            "Storage), then try again."
+        )
+    else:
+        parts.append("Choose a destination on a drive with more room, or free up space and try again.")
+    if device_reason:
+        parts.append(f"The iPhone reported: {device_reason}.")
+    return " ".join(parts)
 
 
 def create_backup(
@@ -305,6 +351,13 @@ def create_backup(
                 "few GB on the iPhone (Settings > General > iPhone Storage; offloading apps "
                 "keeps their data), then try again. If the iPhone has plenty of space, check "
                 "the destination drive has room too."
+            )
+        if any(m in buf for m in _INSUFFICIENT_SPACE):
+            reason = _DEVICE_ERROR_RE.search(buf)
+            raise IOSBackupError(
+                _no_space_message(
+                    udid, backup_root, f"{reason.group(2)} (error {reason.group(1)})" if reason else None
+                )
             )
         if _NEEDS_PASSWORD in buf or _ENCRYPTED_BACKUP in buf:
             raise IOSBackupError(
