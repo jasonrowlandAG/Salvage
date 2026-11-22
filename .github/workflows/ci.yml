@@ -140,3 +140,27 @@ jobs:
           name: Salvage-windows
           path: Salvage-windows.zip
           retention-days: 14
+
+      # NSIS ships on the windows-latest runner. Building the installer here rather
+      # than on a developer machine means it is produced and smoke-tested on the
+      # platform it targets; the Homebrew makensis build on Apple Silicon aborts
+      # with std::bad_alloc before writing anything, so macOS cannot do this.
+      - name: Build the Windows installer
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          makensis /DAPP_VERSION=$version /DBUILD_DIR=..\..\dist\Salvage packaging\windows\installer.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
+
+      - name: Verify the installer was produced
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem packaging\windows\Salvage-Setup-*.exe
+          if (-not $exe) { throw "no installer produced" }
+          "installer: $($exe.Name) ($([math]::Round($exe.Length / 1MB, 1)) MB)"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: Salvage-windows-installer
+          path: packaging/windows/Salvage-Setup-*.exe
+          retention-days: 14

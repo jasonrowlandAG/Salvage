@@ -1,10 +1,10 @@
-; packaging/windows/installer.nsi — NSIS installer script for Salvage on Windows.
+; packaging/windows/installer.nsi -- NSIS installer script for Salvage on Windows.
 ;
 ; ============================================================================
 ; STATUS: UNTESTED. Written and reviewed on macOS, which cannot run NSIS's
 ; compiler (makensis) or exercise the resulting installer. This script has
 ; never been compiled or run. Build and test it on a real Windows machine (or
-; a Windows CI runner) before it ships — see docs/release-checklist.md for
+; a Windows CI runner) before it ships -- see docs/release-checklist.md for
 ; what "tested" must mean here (a full install/launch/uninstall pass on a
 ; clean Windows VM, at minimum).
 ; ============================================================================
@@ -13,7 +13,7 @@
 ;   - A PyInstaller onedir build of Salvage already exists at ${BUILD_DIR}
 ;     (Salvage.exe plus its bundled Python runtime, DLLs, and the Sleuth Kit /
 ;     libimobiledevice CLI tools for Windows). Producing that build is out of
-;     scope for this file — it's part of the separate Windows-support work
+;     scope for this file -- it's part of the separate Windows-support work
 ;     (PyInstaller spec + CI under .github/workflows/). This script only
 ;     packages an already-built app into an installer.
 ;   - NSIS itself is installed (https://nsis.sourceforge.io/). No third-party
@@ -30,7 +30,7 @@
 ; Code signing: this produces an UNSIGNED installer. Windows SmartScreen will
 ; warn ("Windows protected your PC") on first run until the exe has enough
 ; download reputation, and an EV (or OV, slower to build reputation) code-
-; signing certificate is what lets you sign it at all — see the "Windows code
+; signing certificate is what lets you sign it at all -- see the "Windows code
 ; signing and SmartScreen" section of docs/release-checklist.md.
 
 !include "LogicLib.nsh"
@@ -41,7 +41,7 @@
   ;   makensis /DAPP_VERSION=0.1.0 installer.nsi
   ; with 0.1.0 extracted from pyproject.toml by whatever CI script drives
   ; this (mirrors how packaging/salvage.spec now reads pyproject.toml
-  ; directly on macOS — NSIS has no built-in TOML parser, so the version has
+  ; directly on macOS -- NSIS has no built-in TOML parser, so the version has
   ; to be handed in rather than read from the file here).
   !define APP_VERSION "0.1.0"
 !endif
@@ -50,8 +50,11 @@
 !define COMPANY_NAME "Assembly Growth"
 !define APP_EXE "Salvage.exe"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
-; Already-built PyInstaller onedir output, relative to this script.
-!define BUILD_DIR "..\..\dist\Salvage"
+; Already-built PyInstaller onedir output, relative to this script. Override with
+; /DBUILD_DIR=<path> to package a build from elsewhere (e.g. a downloaded CI artifact).
+!ifndef BUILD_DIR
+  !define BUILD_DIR "..\..\dist\Salvage"
+!endif
 
 Name "${APP_NAME}"
 OutFile "Salvage-Setup-${APP_VERSION}.exe"
@@ -63,9 +66,8 @@ InstallDirRegKey HKLM "Software\${APP_NAME}" "InstallDir"
 ; Writing to Program Files and HKLM both require elevation.
 RequestExecutionLevel admin
 
-; TODO once an .ico exists (convert from packaging/assets/Salvage.icns):
-;   Icon "..\assets\Salvage.ico"
-;   UninstallIcon "..\assets\Salvage.ico"
+Icon "..\assets\Salvage.ico"
+UninstallIcon "..\assets\Salvage.ico"
 
 Page directory
 Page instfiles
