@@ -6,6 +6,7 @@ import plistlib
 import re
 import shutil
 import sqlite3
+import select
 import subprocess
 import tempfile
 import threading
@@ -163,6 +164,13 @@ def _parse_size(text: str) -> int | None:
     return int(float(m.group(1)) * _SIZE_MULT.get(m.group(2), 1))
 
 
+# idevicebackup2 prints something within seconds of a healthy start. Total silence for
+# this long (and not waiting on a passcode the user may be typing) means the protocol
+# handshake has stalled, which is what happens on an iOS release newer than the bundled
+# libimobiledevice understands. Fail with a clear message instead of hanging forever.
+_STALL_TIMEOUT_S = 120.0
+
+
 def create_backup(
     udid: str,
     backup_root: Path,
@@ -200,10 +208,15 @@ def create_backup(
     tail = ""
     cancelled = False
     saw_passcode_wait = False
+    last_output = time.monotonic()
+    stalled = False
 
     def _read_chunk() -> str | None:
         if master_fd is not None:
             try:
+                # Wake once a second so cancel and the stall watchdog stay responsive.
+                if not select.select([master_fd], [], [], 1.0)[0]:
+                    return ""
                 raw = os.read(master_fd, 8192)
             except OSError:
                 return None
@@ -223,6 +236,13 @@ def create_backup(
         chunk = _read_chunk()
         if chunk is None:
             break
+        if chunk == "":
+            if not saw_passcode_wait and time.monotonic() - last_output > _STALL_TIMEOUT_S:
+                stalled = True
+                _terminate(proc)
+                break
+            continue
+        last_output = time.monotonic()
         buf += chunk
         tail = (tail + chunk)[-4096:]
 
@@ -265,6 +285,13 @@ def create_backup(
 
     if cancelled:
         raise IOSBackupError("Backup cancelled.")
+
+    if stalled:
+        raise IOSBackupError(
+            "The iPhone stopped responding to the backup tool, which usually means this iOS "
+            "version is newer than the bundled iPhone tools support. Try an existing Finder "
+            "backup instead (Use an existing backup folder), or update Salvage."
+        )
 
     if proc.returncode != 0:
         log_path = backup_root / "idevicebackup2.log"
