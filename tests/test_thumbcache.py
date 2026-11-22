@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import shutil
 import struct
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,19 +56,39 @@ def test_get_returns_none_when_nothing_cached(tmp_path):
     assert thumbcache.get(img_path) is None
 
 
-def test_ensure_generates_thumbnail_for_heic(tmp_path):
-    pillow_heif = pytest.importorskip("pillow_heif")
+@pytest.mark.skipif(sys.platform != "darwin" or shutil.which("sips") is None, reason="needs macOS sips + QuickLook")
+def test_ensure_generates_thumbnail_for_real_heic_via_quicklook(tmp_path):
+    # HEIC is decoded by the OS (QuickLook), not an in-process library: no pillow-heif here.
+    png_path = tmp_path / "src.png"
+    Image.new("RGB", (600, 400), (200, 30, 30)).save(png_path)
     heic_path = tmp_path / "photo.heic"
-    img = Image.new("RGB", (600, 400), (200, 30, 30))
-    heif_file = pillow_heif.from_pillow(img)
-    heif_file.save(heic_path, quality=80)
+    subprocess.run(["sips", "-s", "format", "heic", str(png_path), "--out", str(heic_path)],
+                   check=True, capture_output=True)
 
     result = thumbcache.ensure(heic_path)
 
-    assert result is not None
-    assert result.exists()
+    assert result is not None and result.exists()
     with Image.open(result) as thumb:
         assert max(thumb.size) <= thumbcache.THUMB_SIZE
+
+
+def test_undecodable_heic_degrades_to_none_not_an_error(tmp_path, monkeypatch):
+    # Where no OS decoder exists (Windows, Linux) a HEIC must yield None -> category icon.
+    monkeypatch.setattr(thumbcache.shutil, "which", lambda _name: None)
+    heic_path = tmp_path / "photo.heic"
+    heic_path.write_bytes(b"\x00\x00\x00\x18ftypheic" + bytes(64))
+
+    assert thumbcache.ensure(heic_path) is None
+    assert thumbcache.generate_batch([heic_path]) == {heic_path: None}
+
+
+def test_app_code_never_imports_pillow_heif():
+    # x265 (GPLv2) rides inside pillow-heif's wheel; the shipped app must never load it.
+    import re
+    root = Path(thumbcache.__file__).resolve().parents[1]
+    pat = re.compile(r"^\s*(import|from)\s+_?pillow_heif", re.M)
+    offenders = [str(p) for p in root.rglob("*.py") if pat.search(p.read_text(encoding="utf-8"))]
+    assert offenders == []
 
 
 def _write_mp4_stub(path: Path) -> None:

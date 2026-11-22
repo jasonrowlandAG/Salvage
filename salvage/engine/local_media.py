@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -32,13 +33,6 @@ from typing import Callable, Literal
 
 from salvage.engine.ios import BackupPasswordError, BackupReader
 from salvage.engine.models import CATEGORY_BY_EXT, Category, category_for
-
-try:
-    import pillow_heif
-
-    pillow_heif.register_heif_opener()
-except ImportError:  # pragma: no cover - exercised only when the dep is missing
-    pass
 
 MEDIA_EXTENSIONS: set[str] = {ext for ext, cat in CATEGORY_BY_EXT.items() if cat in ("image", "video")} | {"raw"}
 
@@ -392,7 +386,22 @@ def _iter_files(root: Path, cancel: threading.Event | None):
 # ---------------------------------------------------------------------------
 
 
+def _exif_taken_via_sips(path: Path) -> datetime | None:
+    """EXIF capture date for HEIC/HEIF via macOS's own `sips` - Pillow has no HEIC decoder
+    (we don't ship pillow-heif; its wheel bundles GPL x265). Returns None elsewhere."""
+    if shutil.which("sips") is None:
+        return None
+    try:
+        out = subprocess.run(["sips", "-g", "creation", str(path)], capture_output=True, text=True, timeout=10).stdout
+        m = re.search(r"creation:\s*(\d{4}:\d{2}:\d{2} \d{2}:\d{2}:\d{2})", out)
+        return datetime.strptime(m.group(1), "%Y:%m:%d %H:%M:%S") if m else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
 def _exif_taken(path: Path) -> datetime | None:
+    if path.suffix.lower() in (".heic", ".heif"):
+        return _exif_taken_via_sips(path)
     try:
         from PIL import Image
     except ImportError:

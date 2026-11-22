@@ -7,10 +7,14 @@ scratch. Never call `ensure()` on a `FoundMedia.cloud_placeholder` item — the 
 actually on disk yet and reading it would trigger an iCloud download.
 
 Generation order per file:
-1. Pillow (+ pillow_heif for HEIC/HEIF, and whatever RAW plugins are installed) for images.
-2. macOS QuickLook (`qlmanage -t`) for videos and anything Pillow can't open — this is the
-   only practical way to get a frame out of most consumer video codecs without a full
-   ffmpeg dependency, and QuickLook already knows how to preview them.
+1. Pillow (and whatever RAW plugins are installed) for images.
+2. macOS QuickLook (`qlmanage -t`) for videos, HEIC/HEIF and anything Pillow can't open —
+   this is the only practical way to get a frame out of most consumer video codecs without a
+   full ffmpeg dependency, and QuickLook already knows how to preview them.
+   HEIC/HEIF deliberately has no in-process decoder: the `pillow-heif` wheel bundles x265
+   (GPLv2) in the same process, which we don't ship (see docs/legal-compliance.md). The
+   operating system decodes HEIC instead. Windows has no equivalent here, so HEIC there
+   gets a category icon; the files are still found, listed, recovered and exported.
 3. Nothing — `ensure()` returns None and the caller falls back to a generic category icon.
 
 QuickLook is invoked per file with a short timeout rather than one call for several files at
@@ -29,13 +33,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-try:
-    import pillow_heif
-
-    pillow_heif.register_heif_opener()
-except ImportError:  # pragma: no cover - exercised only when the dep is missing
-    pass
-
 THUMB_SIZE = 256
 # Larger render used by the preview panel's main view and its "open full size" zoom
 # window — same cache dir and generation logic as THUMB_SIZE, just a bigger target, so
@@ -48,7 +45,7 @@ CACHE_DIR = Path.home() / "Library" / "Caches" / "Salvage" / "thumbs"
 # Extensions QuickLook is worth trying for (Pillow can't open these).
 _QUICKLOOK_EXTS = {
     "mov", "mp4", "m4v", "avi", "mkv", "3gp", "3g2",
-    "heic", "heif",  # tried only if Pillow/pillow_heif failed to open them
+    "heic", "heif",  # Pillow has no HEIC decoder; QuickLook (the OS) does
 }
 
 
@@ -225,13 +222,8 @@ def _ensure_sized(path: Path, render_size: int) -> Path | None:
         return dest
 
     ext = path.suffix.lstrip(".").lower()
-    if ext not in _QUICKLOOK_EXTS:
-        if _generate_with_pillow(path, dest, max_size=render_size):
-            return dest
-    else:
-        # Still worth a Pillow attempt for HEIC/HEIF when pillow_heif is present.
-        if ext in ("heic", "heif") and _generate_with_pillow(path, dest, max_size=render_size):
-            return dest
+    if ext not in _QUICKLOOK_EXTS and _generate_with_pillow(path, dest, max_size=render_size):
+        return dest
 
     if _generate_with_quicklook(path, dest, size=render_size):
         return dest

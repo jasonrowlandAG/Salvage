@@ -6,7 +6,6 @@ requires-python = ">=3.11"
 dependencies = [
     "PySide6>=6.8",
     "pillow>=10",
-    "pillow-heif>=0.18",
     "pycryptodome>=3.20",
     # There is no pty on Windows, and PhotoRec/Sleuth Kit block-buffer their stdout
     # when it isn't a real console -- pywinpty gives the Windows scan path a ConPTY
@@ -15,7 +14,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pyinstaller>=6.22"]
+# pillow-heif is TEST-ONLY: its tests/benchmarks need to *encode* sample HEIC files. Its wheel
+# bundles x265 (GPLv2), so it must never become a runtime dependency or reach the shipped app
+# (see docs/legal-compliance.md). HEIC decoding at runtime is the OS's job (QuickLook/sips).
+dev = ["pytest>=8", "pyinstaller>=6.22", "pillow-heif>=0.18"]
 
 [project.scripts]
 salvage = "salvage.__main__:main"

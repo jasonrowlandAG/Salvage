@@ -55,7 +55,9 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # pillow-heif's wheel bundles x265 (GPLv2); it is a test-only dependency and must never
+    # be pulled into the app even though the build venv has it installed (dev extra).
+    excludes=["pillow_heif", "_pillow_heif"],
     noarchive=False,
     cipher=block_cipher,
 )

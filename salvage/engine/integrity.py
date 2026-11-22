@@ -36,13 +36,6 @@ except ImportError:  # pragma: no cover - Pillow is a project dependency
     Image = None  # type: ignore[assignment]
     ImageFile = None  # type: ignore[assignment]
 
-try:
-    import pillow_heif
-
-    pillow_heif.register_heif_opener()
-except ImportError:  # pragma: no cover - pillow-heif is a project dependency
-    pillow_heif = None  # type: ignore[assignment]
-
 # Above this many bytes, skip a real decode/decompress attempt and fall back to a
 # structural-only verdict (never claim INTACT off a skipped decode - see each
 # checker's "large file" branch).
@@ -184,7 +177,7 @@ def _verify_png(path: Path, size: int) -> Verdict:
 
 
 # ---------------------------------------------------------------------------
-# GIF / BMP / TIFF / WebP / HEIC - header sniff + Pillow (pillow_heif for HEIC)
+# GIF / BMP / TIFF / WebP - header sniff + Pillow; HEIC - structural box check
 # ---------------------------------------------------------------------------
 
 
@@ -223,8 +216,6 @@ _HEADER_CHECKS = {
     "tif": (_has_tiff_header, "no TIFF byte-order marker"),
     "tiff": (_has_tiff_header, "no TIFF byte-order marker"),
     "webp": (_has_webp_header, "no RIFF/WEBP signature"),
-    "heic": (_has_heic_header, "no HEIC ftyp box"),
-    "heif": (_has_heic_header, "no HEIC ftyp box"),
 }
 
 
@@ -237,9 +228,6 @@ def _verify_pillow_image(path: Path, size: int, ext: str) -> Verdict:
         return Integrity.CORRUPT, f"could not read file: {exc}"
     if not check(head):
         return Integrity.CORRUPT, reason
-
-    if ext in ("heic", "heif") and pillow_heif is None:
-        return Integrity.UNKNOWN, "ftyp box present; pillow_heif not available to confirm"
 
     if Image is None:
         return Integrity.UNKNOWN, "Pillow not available to confirm"
@@ -396,6 +384,35 @@ def _verify_isobmff(path: Path, size: int) -> Verdict:
     if last_pos + last_size > size:
         return Integrity.PARTIAL, "truncated: final box extends past end of file"
 
+    return Integrity.INTACT, None
+
+
+def _verify_heic(path: Path, size: int) -> Verdict:
+    """Structural check only - there is deliberately no in-process HEVC decoder (pillow-heif's
+    wheel bundles GPL x265, which we don't ship). Same standard as the MP4 check: the `meta`
+    box (item locations/properties) and `mdat` (the coded image) must both be present and the
+    file must not end mid-box. That catches the usual recovery damage (truncation, a lost
+    tail); it can't see a flipped byte inside the coded image data."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(64)
+            if not _has_heic_header(head):
+                return Integrity.CORRUPT, "no HEIC ftyp box"
+            boxes = list(_iter_boxes(f, 0, size))
+    except OSError as exc:
+        return Integrity.CORRUPT, f"could not read file: {exc}"
+
+    types = {t for _, t, _, _ in boxes}
+    if b"meta" not in types:
+        return Integrity.PARTIAL if b"mdat" in types else Integrity.CORRUPT, "missing meta box"
+    if b"mdat" not in types:
+        return Integrity.PARTIAL, "missing mdat box (image data not recovered)"
+    for pos, box_type, box_size, header_len in boxes:
+        if box_type == b"mdat" and size - (pos + header_len) < box_size - header_len:
+            return Integrity.PARTIAL, "truncated: mdat extends past end of file"
+    last_pos, _t, last_size, _h = boxes[-1]
+    if last_pos + last_size > size:
+        return Integrity.PARTIAL, "truncated: final box extends past end of file"
     return Integrity.INTACT, None
 
 
@@ -610,7 +627,8 @@ def _verify_rar(path: Path, size: int) -> Verdict:
 
 _ZIP_EXTS = {"zip", "docx", "xlsx", "pptx", "odt", "ods", "odp", "epub", "jar"}
 _ISOBMFF_EXTS = {"mp4", "mov", "m4v", "m4a"}
-_PILLOW_EXTS = {"gif", "bmp", "tif", "tiff", "webp", "heic", "heif"}
+_PILLOW_EXTS = {"gif", "bmp", "tif", "tiff", "webp"}
+_HEIC_EXTS = {"heic", "heif"}
 _SQLITE_EXTS = {"sqlite", "sqlite3", "db"}
 
 
@@ -633,6 +651,8 @@ def verify(path: Path, ext: str | None = None) -> Verdict:
             return _verify_png(path, size)
         if ext in _PILLOW_EXTS:
             return _verify_pillow_image(path, size, ext)
+        if ext in _HEIC_EXTS:
+            return _verify_heic(path, size)
         if ext == "pdf":
             return _verify_pdf(path, size)
         if ext in _ZIP_EXTS:

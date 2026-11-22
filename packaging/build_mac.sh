@@ -108,3 +108,12 @@ fi
 
 echo "==> Bundle size"
 du -sh "$APP"
+
+# Licence guard: pillow-heif's wheel bundles x265 (GPLv2) in-process alongside libheif.
+# Salvage decodes HEIC through the OS instead, so none of that may be in the bundle.
+echo "==> Checking the bundle is free of x265 / libheif"
+if find "$APP" \( -iname "*x265*" -o -iname "*libheif*" -o -iname "*de265*" -o -iname "*pillow_heif*" \) | grep -q .; then
+    echo "error: x265/libheif/pillow_heif found in $APP (GPL exposure, see docs/legal-compliance.md):" >&2
+    find "$APP" \( -iname "*x265*" -o -iname "*libheif*" -o -iname "*de265*" -o -iname "*pillow_heif*" \) >&2
+    exit 1
+fi

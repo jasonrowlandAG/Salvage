@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import struct
 import sys
@@ -455,3 +456,16 @@ def test_default_sources_windows_finds_ios_backups(tmp_path, monkeypatch):
 def test_default_sources_non_windows_non_macos_is_empty(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     assert lm.default_sources() == []
+
+
+@pytest.mark.skipif(sys.platform != "darwin" or shutil.which("sips") is None, reason="needs macOS sips")
+def test_exif_taken_reads_heic_capture_date_natively(tmp_path):
+    pillow_heif = pytest.importorskip("pillow_heif")  # test-only encoder; the app never imports it
+    from PIL import Image
+
+    exif = Image.Exif()
+    exif[306] = "2021:03:04 05:06:07"
+    p = tmp_path / "IMG_1.heic"
+    pillow_heif.from_pillow(Image.new("RGB", (32, 32), (1, 2, 3))).save(p, exif=exif)
+
+    assert lm._exif_taken(p) == datetime(2021, 3, 4, 5, 6, 7)
