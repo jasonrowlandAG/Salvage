@@ -11,9 +11,13 @@ app), `docs/privacy.md`, `CHANGELOG.md`.
 
 ---
 
-## 0. Distribution mode (chosen 2026-09-22)
+## 0. Distribution mode (chosen 2026-09-22, reconfirmed by Jay 22/11/2026)
 
-**Active mode: no-fee / source-first.** We are **not** joining the Apple
+**Active mode: no-fee / source-first — explicitly chosen by Jay, not a default.**
+Signed/notarised binaries and a paid product were offered and declined for v0.1;
+Gatekeeper and SmartScreen warnings are therefore accepted, expected behaviour,
+not defects. Revisit only if the distribution mode changes.
+ We are **not** joining the Apple
 Developer Program for v0.1. Public install is clone + Homebrew tools +
 `python -m salvage` (see README). Optional self-built `.app` is documented
 as Gatekeeper-rejected without right-click → Open. Notarization (§4) and a
