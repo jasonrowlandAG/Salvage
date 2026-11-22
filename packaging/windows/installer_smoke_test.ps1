@@ -100,11 +100,15 @@ try {
     $out = & $exe --print-engine 2>&1 | Out-String
 } finally { $env:PATH = $originalPath }
 Write-Host ($out -replace "(?m)^", "    | ")
+# --print-engine prints photorec as a plain string (backslashes) but the Sleuth Kit
+# tools as WindowsPath('C:/...') with forward slashes, so normalise both the output
+# and the expected path to one separator before matching.
+$outNorm = $out.Replace('/', '\')
 $escaped = [regex]::Escape($InstallDir)
 Check ($out -match "frozen=True") "app reports frozen=True"
 Check ($out -match "MEIPASS=$escaped") "MEIPASS is inside the install dir"
 Check ($out -match "photorec=$escaped.*photorec_win\.exe") "photorec resolves inside the install dir"
-Check ($out -match "sleuthkit=.*$escaped.*fls\.exe") "Sleuth Kit resolves inside the install dir"
+Check ($outNorm -match "sleuthkit=.*$escaped.*fls\.exe") "Sleuth Kit resolves inside the install dir"
 Check (($out -notmatch "unavailable") -or ($out -notmatch "photorec=<unavailable")) "engine binaries are available"
 Check ($out -notmatch [regex]::Escape($RepoRoot)) "no engine path points into the build workspace"
 Check ($out -notmatch "runneradmin\\.*tools|RUNNER_TEMP|\\tools\\") "no engine path points at the CI tool download dir"
