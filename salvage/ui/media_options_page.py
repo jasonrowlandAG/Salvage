@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from salvage.ui.format_utils import this_computer
+
 import os
 import subprocess
 from pathlib import Path
@@ -44,7 +46,7 @@ def _accessible(path: Path) -> tuple[bool, str | None]:
     except PermissionError:
         return False, "Grant Salvage Full Disk Access in System Settings → Privacy & Security."
     except FileNotFoundError:
-        return False, "Not found on this Mac."
+        return False, f"Not found on {this_computer()}."
     except OSError as exc:
         return False, str(exc)
 
@@ -98,7 +100,7 @@ class MediaOptionsPage(QWidget):
         outer.setContentsMargins(32, 28, 32, 28)
         outer.setSpacing(14)
 
-        heading = QLabel("Search this Mac for photos & videos")
+        heading = QLabel(f"Search {this_computer()} for photos & videos")
         heading.setProperty("role", "heading")
         outer.addWidget(heading)
 

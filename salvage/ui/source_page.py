@@ -25,8 +25,13 @@ from salvage.engine.ios import IOSDevice
 from salvage.engine.models import Device
 from salvage.ui import engine_facade, ios_facade
 from salvage.ui.device_icons import device_icon, phone_icon
-from salvage.ui.format_utils import human_size
+from salvage.ui.format_utils import human_size, is_mac, media_search_blurb, this_computer
 
+_SYSTEM_DISK_WARNING_WINDOWS = (
+    "This is the drive Windows is running from. Anything this PC does while Salvage scans can "
+    "overwrite the files you want back, so use it as little as you can, and save recovered "
+    "files to a different drive. Results are best from a drive that isn't in use."
+)
 _SYSTEM_DISK_WARNING_FILEVAULT_ON = (
     "This is your Mac's startup disk. macOS blocks direct scanning of it — that's true no "
     "matter what permissions Salvage has, and this disk is also encrypted with FileVault. "
@@ -106,12 +111,10 @@ class MediaSearchCard(QFrame):
 
         text_layout = QVBoxLayout()
         text_layout.setSpacing(2)
-        name_label = QLabel("Photos & videos on this Mac")
+        name_label = QLabel(f"Photos & videos on {this_computer()}")
         name_label.setStyleSheet("font-weight: 600;")
         text_layout.addWidget(name_label)
-        sub_label = QLabel(
-            "Search the Photos library, Messages, iCloud Drive, cloud folders and iPhone backups"
-        )
+        sub_label = QLabel(media_search_blurb())
         sub_label.setProperty("role", "subheading")
         sub_label.setWordWrap(True)
         text_layout.addWidget(sub_label)
@@ -201,7 +204,7 @@ class SourcePage(QWidget):
         header_row.addWidget(self.refresh_btn)
         outer.addLayout(header_row)
 
-        mac_heading = QLabel("This Mac")
+        mac_heading = QLabel(this_computer().capitalize())
         mac_heading.setStyleSheet("font-weight: 600;")
         outer.addWidget(mac_heading)
 
@@ -324,6 +327,14 @@ class SourcePage(QWidget):
         if not self._is_system_target(device):
             self.system_disk_warning.hide()
             self.continue_btn.setEnabled(True)
+            return
+
+        if not is_mac():
+            # Windows can read the system drive raw as Administrator, so this is a caution,
+            # not a block. The macOS wording (FileVault, APFS, Time Machine) would be wrong.
+            self.system_disk_warning.setText(_SYSTEM_DISK_WARNING_WINDOWS)
+            self.continue_btn.setEnabled(True)
+            self.system_disk_warning.show()
             return
 
         filevault_on = engine_facade.filevault_enabled(self.controller.fake)

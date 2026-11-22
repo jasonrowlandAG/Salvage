@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 
 from salvage.engine import thumbcache
 from salvage.engine.local_media import FoundMedia
-from salvage.ui.format_utils import human_size
+from salvage.ui.format_utils import this_computer, human_size
 from salvage.ui.preview_panel import PreviewPanel
 from salvage.ui.results_page import BadgeRole, FileTileDelegate
 from salvage.ui.thumb_service import BackgroundThumbnailService
@@ -202,7 +202,7 @@ class MediaResultsPage(QWidget):
         outer.setContentsMargins(24, 20, 24, 20)
         outer.setSpacing(12)
 
-        heading = QLabel("Photos & videos found on this Mac")
+        heading = QLabel(f"Photos & videos found on {this_computer()}")
         heading.setProperty("role", "heading")
         outer.addWidget(heading)
 

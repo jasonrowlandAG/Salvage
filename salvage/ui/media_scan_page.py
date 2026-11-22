@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from salvage.ui.format_utils import human_size
+from salvage.ui.format_utils import this_computer, human_size
 from salvage.ui.workers import MediaScanWorker
 
 
@@ -27,7 +27,7 @@ class MediaScanPage(QWidget):
         outer.setContentsMargins(32, 28, 32, 28)
         outer.setSpacing(16)
 
-        heading = QLabel("Searching this Mac")
+        heading = QLabel(f"Searching {this_computer()}")
         heading.setProperty("role", "heading")
         outer.addWidget(heading)
 

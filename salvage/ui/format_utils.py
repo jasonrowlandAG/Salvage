@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 
 def human_size(num_bytes: int) -> str:
     size = float(num_bytes)
@@ -40,3 +42,18 @@ def human_remaining(seconds: float | None) -> str:
     if hours < 2:
         return "Over an hour left"
     return f"About {int(round(hours))} hours left"
+
+
+def is_mac() -> bool:
+    return sys.platform == "darwin"
+
+
+def this_computer() -> str:
+    """"this Mac" / "this PC" - user-facing copy must name the machine it is running on."""
+    return "this Mac" if is_mac() else "this PC"
+
+
+def media_search_blurb() -> str:
+    if is_mac():
+        return "Search the Photos library, Messages, iCloud Drive, cloud folders and iPhone backups"
+    return "Search Pictures, Videos, Documents, Downloads, OneDrive and cloud folders"
