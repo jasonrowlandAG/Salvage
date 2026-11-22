@@ -21,3 +21,22 @@ def human_elapsed(seconds: float) -> str:
     if hours:
         return f"{hours:d}:{minutes:02d}:{secs:02d}"
     return f"{minutes:02d}:{secs:02d}"
+
+
+def human_remaining(seconds: float | None) -> str:
+    """A deliberately coarse "time left". Scan throughput swings widely (sparse
+    regions fly, dense ones crawl), so a to-the-second figure would be false
+    precision that users would hold us to. Round to a band instead."""
+    if seconds is None:
+        return "Estimating time left..."
+    if seconds < 60:
+        return "About a minute left"
+    minutes = seconds / 60
+    if minutes < 10:
+        return f"About {int(round(minutes))} minutes left"
+    if minutes < 60:
+        return f"About {int(round(minutes / 5) * 5)} minutes left"
+    hours = minutes / 60
+    if hours < 2:
+        return "Over an hour left"
+    return f"About {int(round(hours))} hours left"

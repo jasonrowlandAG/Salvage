@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from salvage.engine.models import ScanProgress, ScanResult
 from salvage.engine.photorec import NOT_ROOT_MESSAGE
-from salvage.ui.format_utils import human_elapsed
+from salvage.ui.format_utils import human_elapsed, human_remaining
 from salvage.ui.workers import ScanWorker
 
 
@@ -48,7 +48,8 @@ class ScanPage(QWidget):
         self.sector_label = QLabel("Sector — of —")
         self.files_label = QLabel("Files found: 0")
         self.elapsed_label = QLabel("Elapsed: 00:00")
-        for lbl in (self.sector_label, self.files_label, self.elapsed_label):
+        self.remaining_label = QLabel("")
+        for lbl in (self.sector_label, self.files_label, self.elapsed_label, self.remaining_label):
             stats_row.addWidget(lbl)
         stats_row.addStretch()
         outer.addLayout(stats_row)
@@ -90,6 +91,7 @@ class ScanPage(QWidget):
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setValue(0)
         self.sector_label.setText("Sector — of —")
+        self.remaining_label.setText("")
         self.files_label.setText("Files found: 0")
         self.elapsed_label.setText("Elapsed: 00:00")
         self.phase_label.setText("Starting…")
@@ -125,7 +127,17 @@ class ScanPage(QWidget):
             self.sector_label.setText("Reading partition table…")
         self.files_label.setText(f"Files found: {progress.files_found}")
         self.elapsed_label.setText(f"Elapsed: {human_elapsed(progress.elapsed_s)}")
+        self.remaining_label.setText(self._remaining_text(progress))
         self.phase_label.setText(progress.phase)
+
+    @staticmethod
+    def _remaining_text(progress: ScanProgress) -> str:
+        fraction = progress.fraction
+        # Below ~2% the rate is too noisy to extrapolate from, and a wildly wrong
+        # first guess is worse than admitting we don't know yet.
+        if not fraction or fraction < 0.02 or progress.elapsed_s <= 0:
+            return "Estimating time left..."
+        return human_remaining(progress.elapsed_s * (1 - fraction) / fraction)
 
     def _on_finished(self, result: ScanResult) -> None:
         self.cancel_btn.setEnabled(False)
