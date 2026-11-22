@@ -21,8 +21,7 @@ file is the reasoning and the business-decision framing behind it.
 **You may:**
 - Distribute Salvage for free, publicly, as-is, including every third-party
   component currently bundled (PhotoRec, the libimobiledevice family,
-  OpenSSL, PySide6/Qt, Pillow, pycryptodome, and pillow-heif's bundled
-  libheif/libde265/x265) — provided you ship the license texts, notices, and
+  OpenSSL, PySide6/Qt, Pillow, pycryptodome; pillow-heif's libheif/libde265/x265 were removed, see below) — provided you ship the license texts, notices, and
   written source offer now completed in `packaging/THIRD_PARTY.md`, and add
   the Licences/About screen specified in `docs/release-checklist.md`.
 - Sell Salvage. No component's license prohibits charging money for it —
@@ -50,28 +49,47 @@ file is the reasoning and the business-decision framing behind it.
   notices in `packaging/THIRD_PARTY.md` exist specifically so this
   distinction is unambiguous.
 - Ship a build that claims "no bundled GPL software" or otherwise
-  misrepresents what's inside — see the x265 finding below; it's easy to
-  assume pillow-heif is purely permissive (BSD-3-Clause) and miss that its
-  compiled wheel isn't.
+  misrepresents what's inside. (The pillow-heif/x265 case that motivated
+  this warning is resolved: it is no longer shipped.)
 
 ---
 
 ## The two things to get a real lawyer to review before a paid launch
 
-### 1. HIGH RISK — x265 inside the pillow-heif wheel may make the *combined,
-running* Salvage.app process a GPL-covered work, not just "an app that also
-contains a GPL binary"
+### 1. RESOLVED (22/11/2026) — x265 inside the pillow-heif wheel
 
-This is different in kind from PhotoRec, and it's the most important finding
-in this document. Detail in "Does bundling create a combined work?" below.
-**Practical mitigation that sidesteps the question entirely: stop shipping
-x265.** Salvage only needs HEIC *decoding* (photo preview); x265 is an HEVC
-*encoder*, present only because pillow-heif's default binary wheel bundles
-the same libheif build whether or not you use its write path. A libheif
-build without x265 (decode-only) would remove this risk completely and
-leave only unambiguous LGPL components. This wasn't done in this pass
-(it requires rebuilding libheif from source, which is a real engineering
-task, not a doc change) — flagged here as the recommended fix.
+**Status: resolved by removal.** Originally flagged as HIGH RISK: x265 (GPLv2)
+was loaded in-process via pillow-heif's wheel, which the FSF treats as a
+combined work. What was found and done:
+
+- **Verified in the wheel:** pillow-heif 1.7.0's macOS wheel bundles
+  `libheif.1.23.3`, `libde265.0.2.2` and `libx265.216`; `otool -L` shows
+  libheif linked against `@loader_path/libx265.216.dylib`, and
+  `libheif_info()` reports an active x265 HEVC *encoder*. The Windows wheel
+  (cp314 win_amd64, inspected from PyPI) likewise ships `libx265-217-*.dll`
+  (22 MB) plus libheif/libde265 and the MinGW runtime. No decode-only
+  pillow-heif wheel exists, so pinning was not an option.
+- **Fix:** removed pillow-heif from Salvage's runtime entirely. HEIC
+  thumbnails/previews use the OS decoder (macOS QuickLook, via the existing
+  `thumbcache` fallback); HEIC capture dates use `sips`; HEIC integrity is a
+  structural box check (`integrity._verify_heic`, same standard as MP4). On
+  Windows/Linux, where no OS decoder is wired up, a HEIC shows the category
+  icon. HEIC files are still found, listed, recovered and exported on every
+  platform (`CATEGORY_BY_EXT` untouched; none of that depends on a decoder).
+- **Guards:** pillow-heif is now a test-only `dev` extra (tests encode sample
+  HEICs), is in the PyInstaller `excludes`, a test fails if any `salvage/`
+  module imports it, and `packaging/build_mac.sh` fails if x265/libheif/
+  libde265/pillow_heif appears in `Salvage.app`. Verified: the rebuilt
+  bundle contains none of them (before: libx265/libheif/libde265 plus
+  `_pillow_heif` in both `Frameworks/` and `Resources/`).
+- **Remaining position:** nothing GPL is linked in-process any more. The
+  only GPL component left is PhotoRec, a separate program run as a
+  subprocess (aggregation). No HEVC decoder or encoder ships with Salvage.
+  Residual caveat: PyInstaller-built Windows installers are produced by CI;
+  confirm the installer contents once the Windows build is re-run (the
+  exclusion applies to all platforms via `salvage.spec`, and the Windows
+  build installs the same `dev` extra, so the DLLs should be absent but have
+  not been inspected locally).
 
 ### 2. The Sleuth Kit tools your own code depends on aren't in the installer
 
@@ -90,9 +108,7 @@ routine.
 | Component | Version | License | Obligation | What we must do |
 |---|---|---|---|---|
 | PhotoRec / TestDisk | 7.2 | GPL-2.0-or-later | §3: source or written offer (≥3yr); §6: no added restrictions | Done — text + written offer in `THIRD_PARTY.md` |
-| pillow-heif wheel: libheif | 1.23.2 | LGPL-3.0 | §4(d): dynamic linking + notice | Done — text + notice |
-| pillow-heif wheel: libde265 | 1.1.1 | LGPL-3.0 | §4(d): dynamic linking + notice | Done — text + notice |
-| pillow-heif wheel: x265 | soname 216 (~4.2) | GPL-2.0 | §3: source or written offer; **combined-work question, see above** | Done (defensively) — text + written offer; **recommend removing x265 from the build instead** |
+| ~~pillow-heif wheel (libheif, libde265, x265)~~ | — | — | — | **Removed** from the bundle; test-only dev dependency |
 | libimobiledevice, libplist, libusbmuxd, libimobiledevice-glue, libtatsu | 1.4.0 / 2.7.0 / 2.1.1 / 1.3.2 / 1.0.5 | LGPL-2.1-or-later | §6(b): dynamic linking + notice | Done — text + notice |
 | OpenSSL | 3.6.x | Apache-2.0 | §4: retain notices | Done — text + attribution |
 | PySide6 / Qt 6 (+ bundled FFmpeg) | 6.11.2 | LGPL-3.0-only (elected option) | §4(d): dynamic linking + notice; relies on Hardened Runtime staying off, see below | Done — text + notice; **re-check if/when Hardened Runtime is enabled for notarization** |
@@ -119,8 +135,7 @@ done in `packaging/THIRD_PARTY.md`:
    closes).
 2. **Copyright/attribution notices** for each component, naming its actual
    author/project — not Assembly Growth.
-3. **A written offer of source** for the GPL-covered components (PhotoRec;
-   the pillow-heif GPL-flagged wheel) — GPLv2 §3(b) specifically requires
+3. **A written offer of source** for the GPL-covered component (PhotoRec) — GPLv2 §3(b) specifically requires
    this be an offer *you* stand behind, valid ≥3 years, not just a link to
    someone else's repo (though pointing to the exact upstream tag satisfies
    it in practice as long as your own offer to provide it directly, should
@@ -131,11 +146,8 @@ done in `packaging/THIRD_PARTY.md`:
 5. **A Licences/About surface in the app** — specified as a requirement in
    `docs/release-checklist.md` (UI implementation owned separately).
 
-Nothing about free distribution is legally blocked. The x265 question above
-is a risk-management issue, not a "can I ship this" blocker — worst case
-under the strict reading is that the combined work should be GPL, which
-still permits free distribution; it just changes what "free" means for your
-own code too (see below).
+Nothing about free distribution is legally blocked, and the former x265
+combined-work question no longer applies (x265 is not shipped).
 
 ---
 
@@ -145,8 +157,7 @@ own code too (see below).
 
 - **GPL components don't prevent selling.** GPLv2 explicitly contemplates
   charging a distribution fee (§1, §3). What it does guarantee is that
-  *whoever you sell it to* can redistribute the GPL-covered parts (PhotoRec;
-  the x265-flagged pillow-heif wheel) further, including for free — you
+  *whoever you sell it to* can redistribute the GPL-covered parts (PhotoRec) further, including for free — you
   cannot contract that away. In practice this only matters if a customer
   chooses to extract and re-share those specific components; it doesn't
   stop you charging for Salvage as a product, and those components are
@@ -175,11 +186,10 @@ own code too (see below).
   §4(d)(0) — "provide the source/object code" instead of "let them
   relink") rather than relying on dynamic linking alone. Worth a specific
   re-check when Hardened Runtime is turned on, not a blocker today.
-- **x265/GPL again:** if the strict reading in the next section is correct,
-  a *paid* distribution would need to extend the same GPL rights (including
+- **x265/GPL (historical, resolved):** had x265 stayed, a *paid* distribution under the strict reading would have needed to extend the same GPL rights (including
   the right to redistribute freely) to every paying customer for the
-  GPL-covered portion of the combined work. This is the concrete stakes
-  behind recommending you remove x265 rather than litigate the theory.
+  GPL-covered portion of the combined work. That was the stake behind removing x265
+  rather than litigating the theory.
 
 ---
 
@@ -215,7 +225,7 @@ source stays MIT under this reading, which is the overwhelming mainstream
 practice (this is how essentially every commercial app that shells out to
 `ffmpeg`, `git`, or similar GPL tools operates).
 
-**The pillow-heif wheel's x265 — the contested, higher-risk case.** This is
+**[Historical — resolved by removing pillow-heif] The pillow-heif wheel's x265 — the contested, higher-risk case.** This is
 architecturally different: `pillow_heif` is a Python C-extension module,
 imported into and running inside the *same process* as Salvage's own code,
 which itself dynamically loads `libheif`, which dynamically loads `x265` —
@@ -252,9 +262,8 @@ entirely, which is the recommended fix here since it's also the simplest.
 **Bottom line:** "bundled in one installer" is not itself the trigger for
 either program — what matters is process/library integration, not
 packaging. Subprocess tools (PhotoRec, libimobiledevice) are fine under
-essentially any reading. The in-process GPL library (x265) is the one
-place where "does this make Salvage's own code GPL" is a live, unresolved
-question, and it's avoidable by not shipping x265.
+essentially any reading. The in-process GPL library (x265) was the one
+place where that was a live question; it is gone.
 
 ---
 
@@ -265,21 +274,14 @@ done. Ship `packaging/THIRD_PARTY.md` (or surface it via the in-app
 Licences screen `docs/release-checklist.md` specifies), keep everything
 dynamically linked and unmodified as it is now. No code changes required.
 
-**Free distribution, hardened (recommended before any public launch, not
-just a paid one):** rebuild/source a libheif without x265 (decode-only —
-Salvage never needs to *write* HEIC), or vendor `libde265` directly instead
-of going through `pillow_heif`'s default wheel. Removes the one contested
-legal question entirely; everything else in the bundle is either clean
-subprocess separation (PhotoRec) or LGPL/Apache/permissive components with
-no combined-work issue at all.
+**Free distribution, hardened:** done. The x265/pillow-heif removal was the recommended hardening step; it is complete (see finding 1).
 
 **Paid distribution:** same as above, plus make sure the written offer of
 source in `packaging/THIRD_PARTY.md` is reachable by an actual paying
 customer (in-app Licences screen, not just a GitHub file) — a source offer
 nobody can find doesn't satisfy GPLv2 §3(b) in spirit even if it technically
-exists in the repo. If x265 isn't removed before a paid launch, get the
-lawyer review flagged above first; the exposure is higher once money is
-changing hands and a court is more likely to have a live case to decide.
+exists in the repo. Only the Sleuth Kit item below still merits a short lawyer look before
+a paid launch.
 
 **The Sleuth Kit, if/when the packaging gap closes:** two options, genuinely
 different in effort —

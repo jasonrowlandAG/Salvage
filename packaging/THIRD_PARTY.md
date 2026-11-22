@@ -25,7 +25,7 @@ exact source-code pointers below are version-specific.
 | Component | Version | Licence (SPDX) | Bundled today? | What we must do |
 |---|---|---|---|---|
 | PhotoRec / TestDisk | 7.2 | `GPL-2.0-or-later` | Yes (`photorec` binary) | Include GPLv2 text + written offer of source (below) |
-| pillow-heif binary wheel (libheif, libde265, x265) | pillow_heif 1.6.0 / libheif 1.23.2 / libde265 1.1.1 / x265 4.2 | `LGPL-3.0` (libheif, libde265) + `GPL-2.0` (x265) — pillow-heif's own docs treat the whole compiled wheel as `GPL-2.0` | Yes (inside the `pillow_heif` Python wheel) | Include GPLv3+LGPLv3 and GPLv2 text + written offer of source (below) |
+| ~~pillow-heif wheel (libheif, libde265, x265)~~ | — | — | **No — removed** (see "Removed: pillow-heif" below) | Nothing. HEIC previews use the operating system's own decoder |
 | libimobiledevice | 1.4.0 | `LGPL-2.1-or-later` | Yes | Include LGPLv2.1 text + notice |
 | libplist | 2.7.0 | `LGPL-2.1-or-later` | Yes | Include LGPLv2.1 text + notice |
 | libusbmuxd | 2.1.1 | `LGPL-2.1-or-later` | Yes | Include LGPLv2.1 text + notice |
@@ -61,10 +61,7 @@ options.
 
 The following components are distributed as compiled binaries inside
 Salvage.app under licences that require either accompanying source code or a
-written offer to provide it (GPLv2 §3(b); the pillow-heif binary wheel
-documents itself as GPL-2.0 for the same reason — see
-`docs/legal-compliance.md` for why we're treating it the same way as PhotoRec
-out of caution).
+written offer to provide it (GPLv2 §3(b)).
 
 This is that offer. It is valid for as long as Salvage is publicly
 distributed, and in any case for at least three years from the date of the
@@ -80,19 +77,16 @@ version you received.
 >
 > Covered components and the exact upstream versions/tags currently bundled:
 > - PhotoRec/TestDisk 7.2 — https://github.com/cgsecurity/testdisk/tree/v7.2
-> - libheif 1.23.2 — https://github.com/strukturag/libheif/tree/v1.23.2
-> - libde265 1.1.1 — https://github.com/strukturag/libde265/tree/v1.1.1
-> - x265 (soname 216, corresponds to release 4.2) — https://bitbucket.org/multicoreware/x265_git/src/4.2
 
-In practice, all four are already public at the URLs above at the exact
-versions we bundle — this written offer exists so the obligation is met even
+In practice, the source is already public at the URL above at the exact
+version we bundle — this written offer exists so the obligation is met even
 if Assembly Growth's own distribution channel is a customer's only contact
 point, and even if any of those upstream projects/hosts ever goes away. If
 you are reading this because an upstream link has died, email the address
 above and we will provide the source directly.
 
 The LGPL-licensed components above (libimobiledevice family, OpenSSL,
-PySide6/Qt, libheif, libde265, and — if ever bundled — libewf) do not require
+PySide6/Qt, and — if ever bundled — libewf) do not require
 this written offer: they're used unmodified and linked dynamically (as
 separate `.dylib`/`.framework` files the OS loads at runtime, never merged
 into Salvage's own compiled code), which each library's own LGPL terms treat
@@ -112,34 +106,23 @@ https://www.cgsecurity.org/wiki/TestDisk_Download).
 GPL-2.0-or-later. This copy is unmodified. Source is available at the URL
 above and via the written offer above.
 
-### pillow-heif binary wheel: libheif, libde265, x265
+### Removed: pillow-heif (libheif, libde265, x265)
 
-**What's bundled:** `pillow_heif` 1.6.0 (a Python package, BSD-3-Clause for
-its own code) ships prebuilt native libraries in its wheel, which
-PyInstaller then copies into `Contents/Frameworks/`:
-`libheif.1.23.2.dylib` (LGPLv3), `libde265.0.2.1.dylib` (LGPLv3, decoder used
-for HEIC preview), and `libx265.216.dylib` (GPLv2, an HEVC **encoder** — see
-the risk note in `docs/legal-compliance.md` on why an encoder Salvage likely
-never calls still carries obligations for the whole bundle).
+Earlier builds bundled the `pillow-heif` wheel, whose prebuilt libraries
+include libheif and libde265 (LGPL-3.0) **and x265 (GPL-2.0, an HEVC
+encoder)** loaded into the same process. Salvage never encodes HEIC, and the
+x265 linkage raised an unresolved combined-work question (see
+`docs/legal-compliance.md`), so it was removed entirely rather than patched:
 
-pillow-heif's own `LICENSES_bundled.txt` (fetched at tag `v1.6.0`, matching
-what we install) states this explicitly: *"License for 'pillow-heif' binary
-wheels: GPLv2, due to base library licenses."* We're treating the whole
-libheif+libde265+x265 stack in our bundle as GPL-2.0 for compliance
-purposes, matching that upstream statement, rather than trying to argue
-LGPLv3 applies to the parts of it that would qualify alone — see
-`docs/legal-compliance.md` for the "combined work" analysis this triggers
-and why it's the single highest-priority open question in that document.
+- Previews/thumbnails of HEIC files now use the operating system's decoder
+  (macOS QuickLook / `sips`). Nothing HEIC-related is shipped by Salvage.
+- `pillow-heif` remains only as a **test-only** development dependency (it
+  encodes sample HEIC files for the test suite). It is excluded from the
+  PyInstaller bundle, and `packaging/build_mac.sh` fails the build if any
+  x265 / libheif / libde265 / pillow_heif file appears in `Salvage.app`.
 
-**Source:**
-- libheif 1.23.2 — https://github.com/strukturag/libheif/tree/v1.23.2
-- libde265 1.1.1 — https://github.com/strukturag/libde265/tree/v1.1.1
-- x265 (release 4.2) — https://bitbucket.org/multicoreware/x265_git/src/4.2
-- pillow-heif's own disclosure — https://github.com/bigcat88/pillow_heif/blob/v1.6.0/LICENSES_bundled.txt
-
-**Licence text:** see "GNU Lesser General Public License v3.0" and "GNU
-General Public License v2.0" below.
-**Written offer:** covered above.
+No licence text, notice or source offer for these components is required
+because none of them is distributed.
 
 ### libimobiledevice, libplist, libusbmuxd, libimobiledevice-glue, libtatsu — LGPL-2.1-or-later
 
@@ -300,7 +283,7 @@ independently.
 
 ### GNU General Public License v2.0
 
-_Verbatim text, fetched from https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt — governs PhotoRec/TestDisk and the x265 component of the pillow-heif binary wheel._
+_Verbatim text, fetched from https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt — governs PhotoRec/TestDisk._
 
 ```
                     GNU GENERAL PUBLIC LICENSE
@@ -645,7 +628,7 @@ Public License instead of this License.
 
 ### GNU General Public License v3.0
 
-_Verbatim text, fetched from libheif's own COPYING file (github.com/strukturag/libheif/blob/v1.23.2/COPYING), which reproduces it in full as incorporated by reference into LGPLv3 below — text is identical to https://www.gnu.org/licenses/gpl-3.0.txt._
+_Verbatim text, fetched from libheif's own COPYING file (github.com/strukturag/libheif/blob/v1.23.2/COPYING; libheif itself is no longer bundled), which reproduces it in full as incorporated by reference into LGPLv3 below — text is identical to https://www.gnu.org/licenses/gpl-3.0.txt._
 
 ```
                     GNU GENERAL PUBLIC LICENSE
@@ -1834,7 +1817,7 @@ That's all there is to it!
 
 ### GNU Lesser General Public License v3.0
 
-_Verbatim text, fetched from https://www.gnu.org/licenses/lgpl-3.0.txt — governs PySide6/Qt, libheif, libde265, and (if ever bundled) libewf. This is the LGPLv3 additional-permissions addendum; it incorporates GPLv3 above by reference (see its own text: "This version of the GNU Lesser General Public License incorporates the terms and conditions of version 3 of the GNU General Public License, supplemented by the additional permissions listed below.")._
+_Verbatim text, fetched from https://www.gnu.org/licenses/lgpl-3.0.txt — governs PySide6/Qt and (if ever bundled) libewf. This is the LGPLv3 additional-permissions addendum; it incorporates GPLv3 above by reference (see its own text: "This version of the GNU Lesser General Public License incorporates the terms and conditions of version 3 of the GNU General Public License, supplemented by the additional permissions listed below.")._
 
 ```
                    GNU LESSER GENERAL PUBLIC LICENSE
@@ -2696,43 +2679,6 @@ INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
 LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
 OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
-```
-
-### pillow-heif (BSD-3-Clause)
-
-_Verbatim text, fetched from github.com/bigcat88/pillow_heif/blob/v1.6.0/LICENSE.txt — governs pillow-heif's own Python source (the binary wheel it ships is separately GPL-2.0, see above)._
-
-```
-Copyright (c) 2021-2023, Pillow-Heif contributors.
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-    * Redistributions of source code must retain the above copyright
-       notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above
-       copyright notice, this list of conditions and the following
-       disclaimer in the documentation and/or other materials provided
-       with the distribution.
-
-    * Neither the name of the Pillow-Heif nor the names of any
-       contributors may be used to endorse or promote products derived
-       from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ### pycryptodome licence

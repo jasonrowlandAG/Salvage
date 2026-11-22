@@ -359,5 +359,4 @@ Launch blockers for source-first v0.1:
    - Apple Developer Program + notarized DMG (§4).
    - Windows NSIS installer signed and tested (§5).
    - Bundling Sleuth Kit inside a `.app` (source path uses `brew install sleuthkit`).
-   - Removing x265 from pillow-heif before a *paid* / notarized binary launch
-     (`docs/legal-compliance.md`).
+   - ~~Removing x265 from pillow-heif~~ — done: pillow-heif removed from the app (`docs/legal-compliance.md`).
