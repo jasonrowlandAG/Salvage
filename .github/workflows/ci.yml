@@ -145,11 +145,18 @@ jobs:
       # than on a developer machine means it is produced and smoke-tested on the
       # platform it targets; the Homebrew makensis build on Apple Silicon aborts
       # with std::bad_alloc before writing anything, so macOS cannot do this.
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --no-progress -y
+
       - name: Build the Windows installer
         shell: pwsh
         run: |
+          # choco puts makensis in Program Files rather than on PATH for this shell.
+          $makensis = Get-ChildItem "C:\Program Files (x86)\NSIS\makensis.exe", "C:\Program Files\NSIS\makensis.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $makensis) { throw "makensis not found after install" }
           $version = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-          makensis /DAPP_VERSION=$version /DBUILD_DIR=..\..\dist\Salvage packaging\windows\installer.nsi
+          & $makensis.FullName /DAPP_VERSION=$version /DBUILD_DIR=..\..\dist\Salvage packaging\windows\installer.nsi
           if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
 
       - name: Verify the installer was produced
