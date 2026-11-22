@@ -88,7 +88,19 @@ Function DesktopShortcutPage
     skip:
 FunctionEnd
 
+Function .onInit
+    ; Match the section view so InstallDirRegKey finds a previous install.
+    SetRegView 64
+FunctionEnd
+
 Section "Install"
+    ; NSIS runs as a 32-bit process, so registry writes are redirected into
+    ; WOW6432Node unless we ask for the 64-bit view. Salvage is a 64-bit app
+    ; installed under $PROGRAMFILES64, so its uninstall entry and InstallDir
+    ; key belong in the 64-bit view too -- otherwise "Apps & features" and
+    ; upgrade detection (InstallDirRegKey) look in the wrong place.
+    SetRegView 64
+
     SetOutPath "$INSTDIR"
     ; Copies the entire onedir build (exe + bundled runtime + DLLs + helper
     ; tools) into Program Files, unmodified.
@@ -117,6 +129,8 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
+    SetRegView 64
+
     Delete "$INSTDIR\Uninstall.exe"
     RMDir /r "$INSTDIR"
 
