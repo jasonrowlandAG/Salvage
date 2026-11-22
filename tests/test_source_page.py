@@ -6,7 +6,9 @@ Apple Silicon Mac regardless of FileVault or Full Disk Access - no permission gr
 changes that outcome, so the message must not suggest one does, and Continue must
 stay disabled either way rather than only when FileVault happens to be on.
 
-Runs offscreen.
+Runs offscreen. These describe macOS behaviour (where the kernel refuses raw reads of
+mounted volumes), so they pin the platform to macOS; the Windows behaviour is covered in
+tests/test_platform_copy.py.
 """
 
 from __future__ import annotations
@@ -20,6 +22,12 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from salvage.engine.models import Device  # noqa: E402
 from salvage.ui import engine_facade  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _pin_macos(monkeypatch):
+    import salvage.ui.source_page as sp
+    monkeypatch.setattr(sp, "is_mac", lambda: True)
 from salvage.ui.app import MainWindow  # noqa: E402
 
 
