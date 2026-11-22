@@ -94,6 +94,9 @@ Function .onInit
 FunctionEnd
 
 Section "Install"
+    ; Per-machine install: shortcuts go in the All Users Start Menu, not the
+    ; account that happened to run the installer.
+    SetShellVarContext all
     ; NSIS runs as a 32-bit process, so registry writes are redirected into
     ; WOW6432Node unless we ask for the 64-bit view. Salvage is a 64-bit app
     ; installed under $PROGRAMFILES64, so its uninstall entry and InstallDir
@@ -122,7 +125,7 @@ Section "Install"
     WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayName" "${APP_NAME}"
     WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
     WriteRegStr HKLM "${UNINSTALL_KEY}" "Publisher" "${COMPANY_NAME}"
-    WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" "$INSTDIR\Uninstall.exe"
+    WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
     WriteRegStr HKLM "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
     WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
     WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
@@ -130,6 +133,7 @@ SectionEnd
 
 Section "Uninstall"
     SetRegView 64
+    SetShellVarContext all
 
     Delete "$INSTDIR\Uninstall.exe"
     RMDir /r "$INSTDIR"
