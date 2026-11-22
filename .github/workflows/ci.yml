@@ -166,6 +166,10 @@ jobs:
           if (-not $exe) { throw "no installer produced" }
           "installer: $($exe.Name) ($([math]::Round($exe.Length / 1MB, 1)) MB)"
 
+      - name: Installer smoke test (install, launch, uninstall)
+        shell: pwsh
+        run: packaging\windows\installer_smoke_test.ps1
+
       - uses: actions/upload-artifact@v5
         with:
           name: Salvage-windows-installer
