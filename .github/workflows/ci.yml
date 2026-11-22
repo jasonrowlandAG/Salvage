@@ -170,6 +170,15 @@ jobs:
         shell: pwsh
         run: packaging\windows\installer_smoke_test.ps1
 
+      - name: Upload Windows GUI screenshot
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: Salvage-windows-gui-screenshot
+          path: salvage-windows-gui.png
+          if-no-files-found: ignore
+          retention-days: 14
+
       - uses: actions/upload-artifact@v5
         with:
           name: Salvage-windows-installer

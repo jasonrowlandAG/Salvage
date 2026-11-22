@@ -113,6 +113,34 @@ Check (($out -notmatch "unavailable") -or ($out -notmatch "photorec=<unavailable
 Check ($out -notmatch [regex]::Escape($RepoRoot)) "no engine path points into the build workspace"
 Check ($out -notmatch "runneradmin\\.*tools|RUNNER_TEMP|\\tools\\") "no engine path points at the CI tool download dir"
 
+# ---- Phase 3b: launch the INSTALLED GUI -------------------------------------
+# --print-engine proves the tools resolve, but not that the desktop app actually opens.
+# Start the real GUI in fake mode (no devices or admin needed), confirm it stays up and
+# shows a top-level window, and keep a screenshot so the Windows UI can be eyeballed.
+Phase "launch installed Salvage.exe GUI (fake mode)"
+$shot = Join-Path $PWD "salvage-windows-gui.png"
+$env:SALVAGE_FAKE = "1"
+$gui = Start-Process -FilePath $exe -PassThru
+Remove-Item Env:\SALVAGE_FAKE -ErrorAction SilentlyContinue
+$up = Wait-Until 40 { $gui.Refresh(); (-not $gui.HasExited) -and $gui.MainWindowHandle -ne 0 }
+Check $up "GUI process is running and owns a top-level window"
+Check (-not $gui.HasExited) "GUI did not crash on startup (alive after launch)"
+$gui.Refresh()
+Write-Host "    window title: '$($gui.MainWindowTitle)'"
+Check ($gui.MainWindowTitle -like "*Salvage*") "window title mentions Salvage"
+Start-Sleep -Seconds 3   # let the first paint land before the screenshot
+try {
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
+    $bmp.Save($shot, [System.Drawing.Imaging.ImageFormat]::Png)
+    Write-Host "    screenshot saved: $shot ($($b.Width)x$($b.Height))"
+} catch { Write-Host "    (screenshot unavailable: $($_.Exception.Message))" }
+if (-not $gui.HasExited) { Stop-Process -Id $gui.Id -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 2
+
 # ---- Phase 4: silent uninstall ---------------------------------------------
 Phase "silent uninstall (/S)"
 # The NSIS uninstaller copies itself to %TEMP% and relaunches, so the process we start
