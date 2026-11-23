@@ -377,10 +377,14 @@ following gaps**. They are known and accepted, not defects to rediscover:
    the UAC prompt on a non-elevated machine, SmartScreen behaviour, upgrade-over-existing-install.
 2. **Unsigned builds.** No Apple notarisation (US$99/yr) and no Windows code-signing certificate.
    Gatekeeper ("right-click -> Open") and SmartScreen warnings are expected behaviour.
-3. **iPhone backup on iOS 27 is unverified.** libimobiledevice 1.4.0 stalls at the backup
-   handshake on iOS 27.2.1. `create_backup` now aborts after 120 s of silence with an explanatory
-   error rather than hanging. A newer upstream build (HEAD 1.4.0-11-g60bf03b) was installed locally
-   but not tested against a device, and the bundled tools in the .app are still 1.4.0. Existing
-   Finder backups ("Use an existing backup folder") do not depend on the live protocol.
+3. ~~**iPhone backup on iOS 27 is unverified.**~~ **Resolved 23/11/2026.** It was never an iOS 27
+   incompatibility. The backup was refused because the Mac's drive (14 GB free) could not hold the
+   iPhone's ~67 GB of data ("ErrorCode 105: Insufficient free disk space on drive to back up"), after
+   the device asks for its passcode. With 37 GB free a full backup of an iOS 27.2.1 iPhone completed
+   (93,389 files, 19 GB), Salvage's reader opened it, and the parsers handled it: 491,617 messages,
+   172 contacts, 894 notes. A transient "protocol version exchange" error on the first attempt cleared
+   on retry. Salvage now explains a no-space refusal with both free-space figures, and aborts after
+   120 s of silence instead of hanging. Not tested: the older stable libimobiledevice 1.4.0 (HEAD
+   1.4.0-11-g60bf03b was used); the bundled tools in the .app are still 1.4.0.
 
 Revisit any of these only if the distribution mode changes or a user reports it.
