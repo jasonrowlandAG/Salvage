@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from salvage.engine.local_media import export_found, scan_sources, source_from_backup_dir
 from salvage.engine.ios import BackupProgress, BackupReader, IOSDevice
 from salvage.engine.ios_parsers import (
     Call,
@@ -63,6 +64,8 @@ class IOSParsedData:
     trashed_photos: list[TrashedPhoto] = field(default_factory=list)
     calls: list[Call] = field(default_factory=list)
     safari_history: list[Visit] = field(default_factory=list)
+    # Photos/videos stored in the backup (Camera Roll originals + Messages attachments).
+    media: list = field(default_factory=list)
 
 
 def ios_recovery_available() -> tuple[bool, str | None]:
@@ -164,6 +167,16 @@ def extract_and_parse_ios(
             notes_path = reader.extract_known("notes", workdir)
             if notes_path is not None:
                 data.notes = parse_notes(notes_path)
+        if "media" in categories and not reader.is_encrypted:
+            # Duplicates (the same photo sent in several chats) are dropped here so the
+            # count, the tab and the export all agree.
+            data.media = [
+                m
+                for m in scan_sources(
+                    [source_from_backup_dir(Path(backup_dir))], None, None, hash_dupes=True
+                )
+                if m.duplicate_of is None
+            ]
         if "photos" in categories:
             photos_path = reader.extract_known("photos_db", workdir)
             if photos_path is not None:
@@ -200,6 +213,8 @@ def export_ios_results(data: IOSParsedData, dest_dir: Path) -> list[Path]:
         written.append(export_csv(data.calls, dest_dir / "call_history.csv"))
     if data.safari_history:
         written.append(export_csv(data.safari_history, dest_dir / "safari_history.csv"))
+    if data.media:
+        written.extend(export_found(data.media, dest_dir / "Photos and videos", None))
     if data.trashed_photos:
         photos_dir = dest_dir / "recently_deleted_photos"
         photos_dir.mkdir(parents=True, exist_ok=True)

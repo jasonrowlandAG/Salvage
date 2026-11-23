@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -25,6 +26,11 @@ CATEGORY_CHECKS: list[tuple[str, str]] = [
     ("whatsapp", "WhatsApp"),
     ("contacts", "Contacts"),
     ("notes", "Notes"),
+    (
+        "media",
+        "Photos & videos saved in the backup (originals only — anything kept in iCloud "
+        "Photos isn't on the phone)",
+    ),
     (
         "photos",
         "Recently Deleted photos (thumbnails only — full-size originals are in "
@@ -134,6 +140,11 @@ class IOSOptionsPage(QWidget):
         browse_btn.clicked.connect(self._browse_destination)
         dest_row.addWidget(browse_btn)
         dest_layout.addLayout(dest_row)
+        self.space_note = QLabel("")
+        self.space_note.setProperty("role", "error")
+        self.space_note.setWordWrap(True)
+        self.space_note.hide()
+        dest_layout.addWidget(self.space_note)
         outer.addWidget(dest_panel)
 
         outer.addStretch()
@@ -207,7 +218,30 @@ class IOSOptionsPage(QWidget):
     def _set_destination(self, path: Path) -> None:
         self.dest_edit.setText(str(path))
         self._destination = path
+        self._update_space_note()
         self._update_start_enabled()
+
+    def _update_space_note(self) -> None:
+        """Warn before a doomed backup. The iPhone refuses to start (error 105) when it
+        judges the destination too small, and it reports that only after the passcode
+        prompt - which looks exactly like the backup hanging."""
+        note = ""
+        used = getattr(self.device, "data_used_bytes", None) if self.device is not None else None
+        if used and self.existing_backup_dir is None and self._destination is not None:
+            try:
+                free = shutil.disk_usage(self._destination).free
+            except OSError:
+                free = None
+            if free is not None and free < used:
+                note = (
+                    # Decimal GB, to match Finder and the engine's own messages.
+                    f"This iPhone holds about {used / 1e9:.0f} GB of data and this drive has "
+                    f"{free / 1e9:.0f} GB free. A backup is usually smaller than that, but the "
+                    "iPhone refuses to start when it thinks there isn't room. An external drive "
+                    "is the safest place to put it."
+                )
+        self.space_note.setText(note)
+        self.space_note.setVisible(bool(note))
 
     def _selected_categories(self) -> set[str]:
         return {key for key, cb in self.category_checks.items() if cb.isChecked()}

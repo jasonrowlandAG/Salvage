@@ -83,6 +83,7 @@ class FoundMedia:
     in_recently_deleted: bool = False
     note: str | None = None
     recovered: bool = False
+    origin: str | None = None   # where inside a backup it came from, e.g. "Camera Roll"
     cloud_placeholder: bool = False   # iCloud file not downloaded; reading it would trigger a download
     preview_only: bool = False        # Photos library original is iCloud-only; `path` is a local preview derivative
 
@@ -785,6 +786,76 @@ def messages_missing_on_mac(chat_db: Path | None = None) -> dict[str, str | None
     return missing
 
 
+_APPLE_EPOCH = 978_307_200  # 2001-01-01 in unix seconds
+
+
+def _apple_to_datetime(value) -> datetime | None:
+    """Messages stores nanoseconds since 2001 on modern iOS, seconds on old versions."""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    if abs(seconds) > 1e12:
+        seconds /= 1e9
+    try:
+        return datetime.fromtimestamp(seconds + _APPLE_EPOCH)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _backup_media_dates(reader: BackupReader) -> tuple[dict[str, datetime], dict[str, datetime]]:
+    """When each photo/video was really taken or received, from the phone's own databases.
+
+    A restored or re-downloaded file's modification time is the day it was fetched (every
+    photo on a freshly set-up phone says "this month"), and received photos often carry no
+    EXIF. The truthful dates live in sms.db (the message that carried it) and the Photos
+    library (capture date). Returns (messages_by_basename, camera_roll_by_filename); either
+    may be empty if a schema changed - dating must never break the scan.
+    """
+    messages: dict[str, datetime] = {}
+    camera: dict[str, datetime] = {}
+    with tempfile.TemporaryDirectory(prefix="salvage-dates-") as tmp:
+        try:
+            sms = reader.extract_known("sms", Path(tmp))
+            if sms is not None:
+                conn = sqlite3.connect(f"file:{sms}?mode=ro", uri=True)
+                try:
+                    rows = conn.execute(
+                        "SELECT a.filename, MIN(m.date) FROM attachment a "
+                        "JOIN message_attachment_join j ON j.attachment_id = a.ROWID "
+                        "JOIN message m ON m.ROWID = j.message_id "
+                        "WHERE a.filename IS NOT NULL GROUP BY a.filename"
+                    ).fetchall()
+                finally:
+                    conn.close()
+                for filename, raw in rows:
+                    when = _apple_to_datetime(raw)
+                    if when is not None and filename:
+                        # Several chats can hold a same-named file; keep the earliest.
+                        key = Path(filename).name
+                        if key not in messages or when < messages[key]:
+                            messages[key] = when
+        except Exception:
+            pass
+        try:
+            photos = reader.extract_known("photos_db", Path(tmp))
+            if photos is not None:
+                conn = sqlite3.connect(f"file:{photos}?mode=ro", uri=True)
+                try:
+                    rows = conn.execute(
+                        "SELECT ZFILENAME, ZDATECREATED FROM ZASSET WHERE ZFILENAME IS NOT NULL"
+                    ).fetchall()
+                finally:
+                    conn.close()
+                for filename, raw in rows:
+                    when = _apple_to_datetime(raw)
+                    if when is not None:
+                        camera[filename] = when
+        except Exception:
+            pass
+    return messages, camera
+
+
 def _scan_ios_backup(
     source: MediaSource,
     found: list[FoundMedia],
@@ -801,6 +872,7 @@ def _scan_ios_backup(
     except (FileNotFoundError, sqlite3.Error, BackupPasswordError):
         return
     try:
+        message_dates, camera_dates = _backup_media_dates(reader)
         sms_matches = reader.find(domain="MediaDomain", relative_path_like="Library/SMS/Attachments/%")
         camera_matches = reader.find(domain="CameraRollDomain", relative_path_like="Media/DCIM/%")
         for bf, is_sms in [(m, True) for m in sms_matches] + [(m, False) for m in camera_matches]:
@@ -811,12 +883,18 @@ def _scan_ios_backup(
             if ext not in MEDIA_EXTENSIONS:
                 continue
             try:
-                mtime = bf.path_on_disk.stat().st_mtime
+                # The iPhone's own file time from the manifest; the blob's mtime is just
+                # when this backup was written.
+                mtime = bf.modified_ts or bf.path_on_disk.stat().st_mtime
             except OSError:
                 continue
             stats.current = display_name
             stats.files_seen += 1
             fm = _build_found_media(bf.path_on_disk, bf.size, mtime, source.key, ext, display_name=display_name)
+            fm.origin = "Messages attachment" if is_sms else "Camera Roll"
+            true_date = (message_dates if is_sms else camera_dates).get(display_name)
+            if true_date is not None:
+                fm.taken = true_date
             if is_sms and display_name in missing_basenames:
                 fm.note = "Missing from this Mac — recovered from iPhone backup"
                 fm.recovered = True

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from salvage.ui.format_utils import human_size
 from salvage.engine.ios_parsers import Call, Contact, Message, Note, TrashedPhoto, Visit
 from salvage.ui.ios_facade import IOSParsedData
 
@@ -272,6 +273,51 @@ class SafariHistoryTableModel(QAbstractTableModel):
         self.endResetModel()
 
 
+class MediaTableModel(QAbstractTableModel):
+    """Photos and videos found in the backup (see ios_facade "media" category)."""
+
+    HEADERS = ["Name", "Taken", "Size", "Type", "Where from"]
+
+    def __init__(self, items: list, parent=None) -> None:
+        super().__init__(parent)
+        self._all = sorted(items, key=lambda m: m.taken or _MIN_DATE, reverse=True)
+        self._visible: list[int] = list(range(len(self._all)))
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return len(self._visible)
+
+    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        return len(self.HEADERS)
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            return self.HEADERS[section]
+        return None
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
+            return None
+        m = self._all[self._visible[index.row()]]
+        col = index.column()
+        if col == 0:
+            return m.name
+        if col == 1:
+            return m.taken.strftime("%Y-%m-%d %H:%M") if m.taken else ""
+        if col == 2:
+            return human_size(m.size)
+        if col == 3:
+            return "Video" if m.category == "video" else "Photo"
+        if col == 4:
+            return getattr(m, "origin", None) or m.note or "iPhone backup"
+        return None
+
+    def set_filter(self, search: str, only_deleted: bool) -> None:
+        self.beginResetModel()
+        needle = search.lower().strip()
+        self._visible = [i for i, m in enumerate(self._all) if not needle or needle in m.name.lower()]
+        self.endResetModel()
+
+
 class PhotoGridModel(QAbstractListModel):
     def __init__(self, photos: list[TrashedPhoto], parent=None) -> None:
         super().__init__(parent)
@@ -417,6 +463,11 @@ class IOSResultsPage(QWidget):
                 f"Safari history ({len(data.safari_history):,})",
                 _CategoryView(SafariHistoryTableModel(data.safari_history), None),
             )
+        if data.media:
+            self._add_tab(
+                f"Photos & videos ({len(data.media):,})",
+                _CategoryView(MediaTableModel(data.media), None),
+            )
         if data.trashed_photos:
             self._add_tab(
                 f"Recently Deleted photos ({len(data.trashed_photos):,})",
@@ -434,6 +485,7 @@ class IOSResultsPage(QWidget):
             + len(data.calls)
             + len(data.safari_history)
             + len(data.trashed_photos)
+            + len(data.media)
         )
         self.footer_label.setText(f"{total:,} items recovered")
 

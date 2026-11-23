@@ -59,6 +59,8 @@ class IOSDevice:
     ios_version: str
     capacity_bytes: int | None
     encrypted_backups: bool
+    # Data stored on the device (what a full backup draws from); None when unreadable.
+    data_used_bytes: int | None = None
 
 
 class IOSBackupError(Exception):
@@ -108,6 +110,14 @@ def _device_info(udid: str) -> IOSDevice | None:
     will_encrypt = _ideviceinfo_value(udid, "WillEncrypt", domain="com.apple.mobile.backup")
     encrypted_backups = (will_encrypt or "").strip().lower() == "true"
 
+    data_used_bytes = None
+    try:
+        cap = int(_ideviceinfo_value(udid, "TotalDataCapacity", domain="com.apple.disk_usage") or "")
+        free = int(_ideviceinfo_value(udid, "AmountDataAvailable", domain="com.apple.disk_usage") or "")
+        data_used_bytes = max(cap - free, 0)
+    except (ValueError, OSError):
+        pass
+
     return IOSDevice(
         udid=udid,
         name=name,
@@ -115,6 +125,7 @@ def _device_info(udid: str) -> IOSDevice | None:
         ios_version=ios_version,
         capacity_bytes=capacity_bytes,
         encrypted_backups=encrypted_backups,
+        data_used_bytes=data_used_bytes,
     )
 
 
@@ -145,6 +156,10 @@ _SIZE_MULT = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
 
 _WAITING_PASSCODE = "Waiting for passcode to be entered on the device"
 _LOCKDOWND_ERROR = "Could not connect to lockdownd"
+# idevicebackup2 prints "Could not perform backup protocol version exchange, error code -1"
+# when the iPhone drops the connection just as the backup starts (typically a locked
+# screen). It is transient: the same command succeeds a moment later.
+_PROTOCOL_EXCHANGE = "protocol version exchange"
 _REFUSED = "device refused to start the backup process"
 _VERSION_MISMATCH = "backup protocol version mismatch"
 _NEEDS_PASSWORD = "Can't get password input in non-interactive mode"
@@ -217,7 +232,46 @@ def _no_space_message(udid: str, backup_root: Path, device_reason: str | None = 
     return " ".join(parts)
 
 
+class _TransientBackupError(IOSBackupError):
+    """The backup failed before it started in a way that usually clears on retry."""
+
+
+# Pauses before the 2nd and 3rd attempts.
+_RETRY_DELAYS_S = (4.0, 8.0)
+
+
 def create_backup(
+    udid: str,
+    backup_root: Path,
+    on_progress: Callable[[BackupProgress], None] | None = None,
+    cancel: threading.Event | None = None,
+    full: bool = True,
+) -> Path:
+    """Run a backup, retrying a transient start-up failure (see _PROTOCOL_EXCHANGE)."""
+    for delay in (*_RETRY_DELAYS_S, None):
+        try:
+            return _create_backup_once(udid, backup_root, on_progress, cancel, full)
+        except _TransientBackupError as exc:
+            if delay is None:
+                raise IOSBackupError(str(exc)) from exc
+            if on_progress is not None:
+                on_progress(
+                    BackupProgress(
+                        percent=0.0,
+                        current_file="Retrying - keep the iPhone unlocked",
+                        bytes_done=None,
+                        elapsed_s=0.0,
+                    )
+                )
+            deadline = time.monotonic() + delay
+            while time.monotonic() < deadline:
+                if cancel is not None and cancel.is_set():
+                    raise IOSBackupError("Backup cancelled.") from exc
+                time.sleep(0.25)
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _create_backup_once(
     udid: str,
     backup_root: Path,
     on_progress: Callable[[BackupProgress], None] | None = None,
@@ -364,6 +418,11 @@ def create_backup(
                 "This backup is password-protected. Salvage cannot read encrypted iPhone "
                 "backups yet — turn off backup encryption on the device (Settings > General "
                 "> Transfer or Reset iPhone > Encrypted Backup) and try again."
+            )
+        if _PROTOCOL_EXCHANGE in buf:
+            raise _TransientBackupError(
+                "The iPhone dropped the connection as the backup started. Unlock it, keep the "
+                "screen on, check the cable is firmly in, and try again."
             )
         if _LOCKDOWND_ERROR in buf:
             raise IOSBackupError(
@@ -621,6 +680,9 @@ class BackupFile:
     path_on_disk: Path
     encryption_key: bytes | None = None  # 4-byte class + 40-byte wrapped key (encrypted backups only)
     protection_class: int | None = None
+    # The file's own modification time on the iPhone (unix seconds), from the manifest. The
+    # blob's mtime on this Mac is when the backup was written, which is never what you want.
+    modified_ts: float | None = None
 
 
 class BackupReader:
@@ -801,6 +863,7 @@ class BackupReader:
                     path_on_disk=path_on_disk,
                     encryption_key=encryption_key,
                     protection_class=protection_class,
+                    modified_ts=_manifest_file_time(file_blob),
                 )
             )
         return results
@@ -849,6 +912,25 @@ class BackupReader:
                 self.extract(sidecar_exact[0], dest_dir / (dest.name + suffix))
 
         return dest
+
+
+def _manifest_file_time(file_blob: bytes | None) -> float | None:
+    """LastModified (falling back to Birth) of a backed-up file, as unix seconds."""
+    if not file_blob:
+        return None
+    try:
+        objects = plistlib.loads(file_blob).get("$objects")
+    except Exception:
+        return None
+    if not isinstance(objects, list):
+        return None
+    for obj in objects:
+        if isinstance(obj, dict) and ("LastModified" in obj or "Birth" in obj):
+            for key in ("LastModified", "Birth"):
+                value = obj.get(key)
+                if isinstance(value, (int, float)) and 0 < value < 4_102_444_800:  # before 2100
+                    return float(value)
+    return None
 
 
 def _manifest_file_size(file_blob: bytes | None) -> int | None:
